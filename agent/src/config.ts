@@ -1,3 +1,4 @@
+import "./env.js";
 import type { Address, Hex } from "viem";
 
 export const COORDINATOR_URL = process.env.COORDINATOR_URL ?? "http://localhost:3001";

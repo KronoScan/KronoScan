@@ -62,7 +62,17 @@ export async function runAudit(
       });
 
       if (!response.ok) {
-        console.error(`  x HTTP ${response.status}: ${await response.text()}`);
+        const paymentHeader = response.headers.get("payment-required");
+        if (paymentHeader) {
+          try {
+            const decoded = JSON.parse(Buffer.from(paymentHeader, "base64").toString());
+            console.error(`  x HTTP ${response.status}: ${decoded.error ?? "unknown error"}`);
+          } catch {
+            console.error(`  x HTTP ${response.status}: ${await response.text()}`);
+          }
+        } else {
+          console.error(`  x HTTP ${response.status}: ${await response.text()}`);
+        }
         continue;
       }
 

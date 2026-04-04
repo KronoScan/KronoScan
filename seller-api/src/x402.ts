@@ -1,45 +1,77 @@
-import type { Request, Response, NextFunction } from "express";
-import type { AuditCategory, X402PricingInfo } from "./types.js";
+import type { RequestHandler } from "express";
+import { AUDIT_CATEGORIES } from "./types.js";
 
 const SELLER_ADDRESS = process.env.SELLER_ADDRESS ?? "0x0000000000000000000000000000000000000000";
-const SELLER_ENS = process.env.SELLER_ENS ?? "audit.kronoscan.eth";
-const PRICE_PER_REQUEST = parseInt(process.env.PRICE_PER_REQUEST ?? "100", 10);
+const USDC_ADDRESS = process.env.USDC_ADDRESS ?? "0x3600000000000000000000000000000000000000";
+// Price in USD — x402 SDK converts to atomic USDC (6 decimals) internally
+// 100 atomic = 0.0001 USDC = $0.0001
+const PRICE_USD = process.env.PRICE_USD ?? "$0.0001";
 const X402_MODE = process.env.X402_MODE ?? "real";
 
 let serverMode: "x402-real" | "stub" = "stub";
+let realMiddleware: RequestHandler | null = null;
 
-async function initRealX402Server(): Promise<boolean> {
+async function initRealX402(): Promise<boolean> {
   if (X402_MODE === "stub") {
     return false;
   }
 
   try {
-    const { x402ResourceServer } = await import("@x402/express");
-    const { BatchFacilitatorClient, GatewayEvmScheme } = await import("@circle-fin/x402-batching/server");
+    const { paymentMiddlewareFromConfig } = await import("@x402/express");
+    const { BatchFacilitatorClient, GatewayEvmScheme } = await import(
+      "@circle-fin/x402-batching/server"
+    );
 
-    // Cast to any to bridge minor type version mismatches between packages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const server = new x402ResourceServer([new BatchFacilitatorClient() as any]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (server as any).register("eip155:*", new GatewayEvmScheme());
-    await server.initialize();
+    // Build route configs for all 10 audit category endpoints
+    const routes: Record<string, { accepts: { scheme: string; network: string; payTo: string; price: string; maxTimeoutSeconds: number; asset: string } }> = {};
+    for (const category of AUDIT_CATEGORIES) {
+      routes[`POST /api/audit/${category}`] = {
+        accepts: {
+          scheme: "exact",
+          network: "eip155:5042002",
+          payTo: SELLER_ADDRESS,
+          price: PRICE_USD,
+          maxTimeoutSeconds: 300,
+          asset: USDC_ADDRESS,
+        },
+      };
+    }
 
-    console.log("[x402] ✓ Real x402 server middleware initialized");
+    realMiddleware = paymentMiddlewareFromConfig(
+      routes,
+      [new BatchFacilitatorClient() as any],
+      [{ network: "eip155:*", server: new GatewayEvmScheme() as any }],
+    ) as RequestHandler;
+
+    console.log("[x402] ✓ Real x402 middleware initialized for all audit routes");
     serverMode = "x402-real";
     return true;
   } catch (err) {
-    console.warn("[x402] Real middleware init failed:", err instanceof Error ? err.message : err);
+    console.warn(
+      "[x402] Real middleware init failed:",
+      err instanceof Error ? err.message : err,
+    );
     return false;
   }
 }
 
-const initPromise = initRealX402Server().then((ok) => {
+const initPromise = initRealX402().then((ok) => {
   if (!ok) {
-    console.warn("╔══════════════════════════════════════════════════════════════╗");
-    console.warn("║  ⚠  SELLER x402 STUB MODE — payment validation disabled    ║");
-    console.warn("║  Any non-empty PAYMENT-SIGNATURE header is accepted.        ║");
-    console.warn("║  Set X402_MODE=real and install @x402/express for real mode. ║");
-    console.warn("╚══════════════════════════════════════════════════════════════╝");
+    console.warn(
+      "╔══════════════════════════════════════════════════════════════╗",
+    );
+    console.warn(
+      "║  ⚠  SELLER x402 STUB MODE — payment validation disabled    ║",
+    );
+    console.warn(
+      "║  Any non-empty PAYMENT-SIGNATURE header is accepted.        ║",
+    );
+    console.warn(
+      "║  Set X402_MODE=real and install @x402/express for real mode. ║",
+    );
+    console.warn(
+      "╚══════════════════════════════════════════════════════════════╝",
+    );
   }
 });
 
@@ -47,26 +79,19 @@ export function getX402ServerMode(): "x402-real" | "stub" {
   return serverMode;
 }
 
-export function x402Middleware(category: AuditCategory) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const paymentHeader = req.headers["payment-signature"] ?? req.headers["x-payment"];
-
-    if (!paymentHeader) {
-      const pricing: X402PricingInfo = {
-        paymentRequired: true,
-        scheme: "exact",
-        pricePerRequest: PRICE_PER_REQUEST,
-        network: "arc-testnet",
-        sellerAddress: SELLER_ADDRESS,
-        sellerENS: SELLER_ENS,
-        acceptsUnverified: true,
-        category,
-      };
-      res.status(402).json(pricing);
-      return;
+export function x402Middleware(): RequestHandler {
+  return (req, res, next) => {
+    if (realMiddleware) {
+      return realMiddleware(req, res, next);
     }
 
-    // Stub mode: accept any non-empty payment header
+    // Stub fallback: accept any non-empty payment header
+    const paymentHeader =
+      req.headers["payment-signature"] ?? req.headers["x-payment"];
+    if (!paymentHeader) {
+      res.status(402).json({ error: "Payment required (stub mode)" });
+      return;
+    }
     next();
   };
 }

@@ -11,6 +11,37 @@ export function getPaymentMode(): "x402-sdk" | "fallback" {
   return mode;
 }
 
+async function ensureGatewayDeposit(): Promise<void> {
+  if (!PRIVATE_KEY) return;
+
+  try {
+    const { GatewayClient } = await import("@circle-fin/x402-batching/client");
+    const gateway = new GatewayClient({
+      chain: "arcTestnet",
+      privateKey: PRIVATE_KEY,
+    });
+
+    const balances = await gateway.getBalances();
+    const available = balances.gateway.available;
+    console.log(`[gateway] Balance: ${available} (atomic USDC)`);
+
+    if (available < 1_000_000n) {
+      console.log("[gateway] Insufficient balance, depositing 1 USDC...");
+      const result = await gateway.deposit("1");
+      console.log(
+        `[gateway] Deposited ${result.formattedAmount} USDC | tx: ${result.depositTxHash}`,
+      );
+    } else {
+      console.log("[gateway] Balance sufficient, skipping deposit");
+    }
+  } catch (err) {
+    console.warn(
+      "[gateway] Deposit check failed (payments may fail):",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 async function initRealX402(): Promise<PaymentFetch | null> {
   if (!PRIVATE_KEY) {
     console.warn("[x402] No PRIVATE_KEY set — cannot initialize x402 SDK");
@@ -18,6 +49,9 @@ async function initRealX402(): Promise<PaymentFetch | null> {
   }
 
   try {
+    // Ensure Gateway has funds before initializing SDK
+    await ensureGatewayDeposit();
+
     const { privateKeyToAccount } = await import("viem/accounts");
     const { wrapFetchWithPayment, x402Client } = await import("@x402/fetch");
     const { registerExactEvmScheme } = await import("@x402/evm/exact/client");
@@ -26,16 +60,13 @@ async function initRealX402(): Promise<PaymentFetch | null> {
     const client = new x402Client();
     registerExactEvmScheme(client, { signer });
 
-    // Try to also register batch scheme for Circle Nanopayments
+    // Register batch scheme for Circle Nanopayments
     try {
       const { registerBatchScheme } = await import(
         "@circle-fin/x402-batching/client"
       );
       const { ExactEvmScheme } = await import("@x402/evm/exact/client");
 
-      // registerBatchScheme with fallbackScheme creates a CompositeEvmScheme
-      // internally, dispatching to BatchEvmScheme for Gateway payments and
-      // ExactEvmScheme for standard on-chain payments.
       registerBatchScheme(client, {
         signer,
         fallbackScheme: new ExactEvmScheme(signer),

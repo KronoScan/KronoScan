@@ -1,3 +1,4 @@
+import "./env.js";
 import express from "express";
 import { AUDIT_CATEGORIES, type AuditCategory, type AuditRequestBody, type ScanMode, type AuditFinding } from "./types.js";
 import { getFindingsForCategory } from "./findings.js";
@@ -10,6 +11,20 @@ const PORT = parseInt(process.env.SELLER_PORT ?? "3002", 10);
 
 const app = express();
 app.use(express.json());
+
+// Debug: log all incoming requests and responses
+app.use((req, res, next) => {
+  const payment = req.headers["payment-signature"] ?? req.headers["x-payment"];
+  console.log(`[http] ${req.method} ${req.path} | payment-header: ${payment ? "present" : "absent"}`);
+  const origEnd = res.end.bind(res);
+  res.end = function (...args: any[]) {
+    if (res.statusCode === 402) {
+      console.log(`[http] → 402 response for ${req.path}`);
+    }
+    return origEnd(...args);
+  } as any;
+  next();
+});
 
 // ─── Health ───
 
@@ -111,7 +126,7 @@ async function handleAuditCategory(
 for (const category of AUDIT_CATEGORIES) {
   app.post(
     `/api/audit/${category}`,
-    x402Middleware(category),
+    x402Middleware(),
     (req, res) => {
       handleAuditCategory(category, req, res).catch((err) => {
         console.error(`[audit/${category}] Error:`, err);
