@@ -1,0 +1,17 @@
+# Foundry
+out/
+cache/
+
+# Broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Env
+.env
+
+# Node (for later phases)
+node_modules/
+
+# OS
+.DS_Store

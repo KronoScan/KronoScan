@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(forge --version)",
+      "Bash(npm --version)",
+      "Bash(git init:*)",
+      "Bash(forge init:*)",
+      "Bash(forge install:*)",
+      "Bash(forge build:*)",
+      "Bash(forge test:*)"
+    ]
+  }
+}
