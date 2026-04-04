@@ -10,6 +10,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@circle-fin/x402-batching": "^2.0.4",
+    "@x402/core": "^2.9.0",
+    "@x402/express": "^2.9.0",
     "express": "^5.1.0"
   },
   "devDependencies": {
