@@ -1,0 +1,14 @@
+{
+  "name": "kronoscan-shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "viem": "^2.47.10",
+    "vitest": "^4.1.2"
+  }
+}
