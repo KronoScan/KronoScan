@@ -1,36 +1,30 @@
 import type { Hex } from "viem";
-import type { StreamStatus } from "./types.js";
+import type { SessionStatus } from "./types.js";
 
-export class StreamNotFoundError extends Error {
-  constructor(public readonly streamId: Hex) {
-    super(`Stream ${streamId} not found`);
-    this.name = "StreamNotFoundError";
+export class SessionNotFoundError extends Error {
+  constructor(public readonly sessionId: Hex) {
+    super(`Session ${sessionId} not found`);
+    this.name = "SessionNotFoundError";
   }
 }
 
-export class StreamAlreadyExistsError extends Error {
-  constructor(public readonly streamId: Hex) {
-    super(`Stream ${streamId} already exists`);
-    this.name = "StreamAlreadyExistsError";
+export class SessionAlreadyExistsError extends Error {
+  constructor(public readonly sessionId: Hex) {
+    super(`Session ${sessionId} already exists`);
+    this.name = "SessionAlreadyExistsError";
   }
 }
 
-export class StreamNotActiveError extends Error {
-  constructor(
-    public readonly streamId: Hex,
-    public readonly currentStatus: StreamStatus,
-  ) {
-    super(`Stream ${streamId} not active (${currentStatus})`);
-    this.name = "StreamNotActiveError";
+export class SessionNotActiveError extends Error {
+  constructor(public readonly sessionId: Hex, public readonly status: SessionStatus) {
+    super(`Session ${sessionId} is not active (status: ${status})`);
+    this.name = "SessionNotActiveError";
   }
 }
 
-export class AuthValueMismatchError extends Error {
-  constructor(
-    public readonly expected: bigint,
-    public readonly received: bigint,
-  ) {
-    super(`Auth value ${received} != effective rate ${expected}`);
-    this.name = "AuthValueMismatchError";
+export class InsufficientBudgetError extends Error {
+  constructor(public readonly remaining: bigint, public readonly requested: bigint) {
+    super(`Insufficient budget: ${remaining} remaining, ${requested} requested`);
+    this.name = "InsufficientBudgetError";
   }
 }

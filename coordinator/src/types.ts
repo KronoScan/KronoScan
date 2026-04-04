@@ -1,56 +1,45 @@
 import type { Address, Hex } from "viem";
 
-// ─── Stream State ───
+// ─── Session State ───
 
-export type StreamStatus =
+export type SessionStatus =
   | "OPENING"
   | "ACTIVE"
   | "CLOSING"
   | "CLOSED"
   | "TERMINATED";
 
-export interface ActiveStream {
-  streamId: Hex;
+export interface ActiveSession {
+  sessionId: Hex;
   buyer: Address;
   seller: Address;
-  baseRate: bigint;
-  effectiveRate: bigint;
+  pricePerRequest: bigint;
+  effectivePrice: bigint;
   deposit: bigint;
   verified: boolean;
   startTime: number; // unix seconds
-  status: StreamStatus;
-  authCount: number;
+  status: SessionStatus;
+  requestCount: number;
   totalConsumed: bigint;
-}
-
-// ─── EIP-3009 Authorization ───
-
-export interface EIP3009Auth {
-  from: Address;
-  to: Address;
-  value: bigint;
-  validAfter: bigint;
-  validBefore: bigint;
-  nonce: Hex;
-  signature: Hex;
+  completedCategories: string[];
 }
 
 // ─── WebSocket Messages ───
 
 export type WsMessageIn =
-  | { type: "open_stream"; seller: Address; baseRate: string; deposit: string; verified: boolean }
-  | { type: "auth"; streamId: Hex; authorization: { from: Address; to: Address; value: string; validAfter: string; validBefore: string; nonce: Hex; signature: Hex } }
-  | { type: "close_stream"; streamId: Hex }
-  | { type: "subscribe"; streamId: Hex };
+  | { type: "open_session"; seller: Address; pricePerRequest: string; deposit: string; verified: boolean }
+  | { type: "record_payment"; sessionId: Hex; category: string; amount: string }
+  | { type: "close_session"; sessionId: Hex }
+  | { type: "subscribe"; sessionId: Hex };
 
 export type WsMessageOut =
-  | { type: "stream_opened"; streamId: Hex; effectiveRate: string; deposit: string; startTime: number }
-  | { type: "stream_update"; streamId: Hex; status: StreamStatus; totalConsumed: string; timeRemaining: number; authCount: number }
-  | { type: "stream_closed"; streamId: Hex; consumed: string; refunded: string; txHash: Hex }
-  | { type: "finding"; streamId: Hex; finding: AuditFinding }
+  | { type: "session_opened"; sessionId: Hex; effectivePrice: string; deposit: string; startTime: number }
+  | { type: "session_update"; sessionId: Hex; status: SessionStatus; totalConsumed: string; requestsRemaining: number; requestCount: number; completedCategories: string[] }
+  | { type: "session_closed"; sessionId: Hex; consumed: string; refunded: string; txHash: Hex }
+  | { type: "finding"; sessionId: Hex; finding: AuditFinding }
   | { type: "error"; message: string };
 
-// ─── Audit Findings (proxied from seller SSE) ───
+// ─── Audit Findings ───
 
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 
@@ -59,4 +48,5 @@ export interface AuditFinding {
   title: string;
   line: number;
   description: string;
+  category: string;
 }

@@ -2,9 +2,9 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import type { Hex, Address } from "viem";
-import { StreamManager } from "./streamManager.js";
+import { SessionManager } from "./sessionManager.js";
 import { VaultClient } from "./vaultClient.js";
-import { StreamNotFoundError, StreamNotActiveError, AuthValueMismatchError } from "./errors.js";
+import { SessionNotFoundError, SessionNotActiveError, InsufficientBudgetError } from "./errors.js";
 import type { WsMessageIn, WsMessageOut } from "./types.js";
 
 // ─── Config ───
@@ -17,7 +17,7 @@ const SOLVENCY_CHECK_INTERVAL = 5_000; // 5 seconds
 
 // ─── State ───
 
-const streamManager = new StreamManager();
+const sessionManager = new SessionManager();
 let vaultClient: VaultClient | null = null;
 
 if (VAULT_ADDRESS && COORDINATOR_KEY) {
@@ -37,44 +37,46 @@ const app = express();
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", streams: streamManager.getActiveStreamIds().length });
+  res.json({ status: "ok", sessions: sessionManager.getActiveSessionIds().length });
 });
 
-app.get("/api/stream/:streamId/status", (req, res) => {
-  const stream = streamManager.getStream(req.params.streamId as Hex);
-  if (!stream) {
-    res.status(404).json({ error: "Stream not found" });
+app.get("/api/session/:sessionId/status", (req, res) => {
+  const session = sessionManager.getSession(req.params.sessionId as Hex);
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
     return;
   }
   res.json({
-    streamId: stream.streamId,
-    status: stream.status,
-    buyer: stream.buyer,
-    seller: stream.seller,
-    verified: stream.verified,
-    authCount: stream.authCount,
-    totalConsumed: stream.totalConsumed.toString(),
+    sessionId: session.sessionId,
+    status: session.status,
+    buyer: session.buyer,
+    seller: session.seller,
+    verified: session.verified,
+    requestCount: session.requestCount,
+    totalConsumed: session.totalConsumed.toString(),
+    completedCategories: session.completedCategories,
   });
 });
 
-app.get("/api/streams", (_req, res) => {
-  const ids = streamManager.getActiveStreamIds();
-  const streams = ids.map((id) => {
-    const s = streamManager.getStream(id)!;
+app.get("/api/sessions", (_req, res) => {
+  const ids = sessionManager.getActiveSessionIds();
+  const sessions = ids.map((id) => {
+    const s = sessionManager.getSession(id)!;
     return {
-      streamId: s.streamId,
+      sessionId: s.sessionId,
       status: s.status,
       buyer: s.buyer,
       seller: s.seller,
-      effectiveRate: s.effectiveRate.toString(),
+      effectivePrice: s.effectivePrice.toString(),
       deposit: s.deposit.toString(),
       verified: s.verified,
       startTime: s.startTime,
-      authCount: s.authCount,
+      requestCount: s.requestCount,
       totalConsumed: s.totalConsumed.toString(),
+      completedCategories: s.completedCategories,
     };
   });
-  res.json({ streams });
+  res.json({ sessions });
 });
 
 // ─── HTTP Server ───
@@ -85,11 +87,11 @@ const server = createServer(app);
 
 const wss = new WebSocketServer({ server, path: "/ws" });
 
-// Track subscriptions: streamId → set of WebSocket clients
+// Track subscriptions: sessionId → set of WebSocket clients
 const subscriptions = new Map<Hex, Set<WebSocket>>();
 
-function broadcast(streamId: Hex, message: WsMessageOut) {
-  const subs = subscriptions.get(streamId);
+function broadcast(sessionId: Hex, message: WsMessageOut) {
+  const subs = subscriptions.get(sessionId);
   if (!subs) return;
   const data = JSON.stringify(message);
   for (const ws of subs) {
@@ -119,27 +121,27 @@ wss.on("connection", (ws) => {
 
     try {
       switch (msg.type) {
-        case "open_stream":
-          await handleOpenStream(ws, msg);
+        case "open_session":
+          await handleOpenSession(ws, msg);
           break;
-        case "auth":
-          await handleAuth(ws, msg);
+        case "record_payment":
+          await handleRecordPayment(ws, msg);
           break;
-        case "close_stream":
-          await handleCloseStream(ws, msg);
+        case "close_session":
+          await handleCloseSession(ws, msg);
           break;
         case "subscribe":
-          handleSubscribe(ws, msg.streamId);
+          handleSubscribe(ws, msg.sessionId);
           break;
         default:
           sendTo(ws, { type: "error", message: "Unknown message type" });
       }
     } catch (err) {
-      if (err instanceof StreamNotFoundError) {
+      if (err instanceof SessionNotFoundError) {
         sendTo(ws, { type: "error", message: err.message });
-      } else if (err instanceof StreamNotActiveError) {
+      } else if (err instanceof SessionNotActiveError) {
         sendTo(ws, { type: "error", message: err.message });
-      } else if (err instanceof AuthValueMismatchError) {
+      } else if (err instanceof InsufficientBudgetError) {
         sendTo(ws, { type: "error", message: err.message });
       } else {
         const message = err instanceof Error ? err.message : "Internal error";
@@ -158,117 +160,124 @@ wss.on("connection", (ws) => {
 
 // ─── Message Handlers ───
 
-async function handleOpenStream(
+async function handleOpenSession(
   ws: WebSocket,
-  msg: Extract<WsMessageIn, { type: "open_stream" }>
+  msg: Extract<WsMessageIn, { type: "open_session" }>
 ) {
-  const streamId = `0x${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}` as Hex;
+  const sessionId = `0x${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}` as Hex;
 
-  const baseRate = BigInt(msg.baseRate);
+  const pricePerRequest = BigInt(msg.pricePerRequest);
   const deposit = BigInt(msg.deposit);
-  const effectiveRate = msg.verified
-    ? (baseRate * 8000n) / 10000n
-    : baseRate;
+  const effectivePrice = msg.verified
+    ? (pricePerRequest * 8000n) / 10000n
+    : pricePerRequest;
 
-  const stream = streamManager.registerStream({
-    streamId,
+  const session = sessionManager.registerSession({
+    sessionId,
     buyer: msg.seller, // placeholder — in production, comes from on-chain event
     seller: msg.seller,
-    baseRate,
-    effectiveRate,
+    pricePerRequest,
+    effectivePrice,
     deposit,
     verified: msg.verified,
     startTime: Math.floor(Date.now() / 1000),
   });
 
-  handleSubscribe(ws, streamId);
+  handleSubscribe(ws, sessionId);
 
   sendTo(ws, {
-    type: "stream_opened",
-    streamId,
-    effectiveRate: stream.effectiveRate.toString(),
-    deposit: stream.deposit.toString(),
-    startTime: stream.startTime,
+    type: "session_opened",
+    sessionId,
+    effectivePrice: session.effectivePrice.toString(),
+    deposit: session.deposit.toString(),
+    startTime: session.startTime,
   });
 
-  console.log(`[stream] Opened ${streamId} | rate=${effectiveRate} | deposit=${deposit} | verified=${msg.verified}`);
+  console.log(`[session] Opened ${sessionId} | price=${effectivePrice} | deposit=${deposit} | verified=${msg.verified}`);
 }
 
-async function handleAuth(
-  ws: WebSocket,
-  msg: Extract<WsMessageIn, { type: "auth" }>
+async function handleRecordPayment(
+  _ws: WebSocket,
+  msg: Extract<WsMessageIn, { type: "record_payment" }>
 ) {
-  const { streamId, authorization } = msg;
+  const { sessionId, category } = msg;
+  const amount = BigInt(msg.amount);
 
-  const stream = streamManager.getStream(streamId);
-  if (!stream) {
-    throw new StreamNotFoundError(streamId);
+  const session = sessionManager.getSession(sessionId);
+  if (!session) {
+    throw new SessionNotFoundError(sessionId);
   }
 
-  const value = BigInt(authorization.value);
-  if (value !== stream.effectiveRate) {
-    throw new AuthValueMismatchError(stream.effectiveRate, value);
+  sessionManager.recordPayment(sessionId, amount, category);
+
+  // Report consumption on-chain
+  if (vaultClient) {
+    try {
+      const txHash = await vaultClient.reportConsumption(sessionId, amount);
+      console.log(`[vault] reportConsumption tx: ${txHash}`);
+    } catch (err) {
+      console.error("[vault] reportConsumption failed:", err);
+    }
   }
 
-  streamManager.recordAuthorization(streamId, value);
-
-  const remaining = stream.deposit > stream.totalConsumed
-    ? Number((stream.deposit - stream.totalConsumed) / stream.effectiveRate)
+  const remaining = session.deposit > session.totalConsumed
+    ? Number((session.deposit - session.totalConsumed) / session.effectivePrice)
     : 0;
 
-  broadcast(streamId, {
-    type: "stream_update",
-    streamId,
-    status: stream.status,
-    totalConsumed: stream.totalConsumed.toString(),
-    timeRemaining: remaining,
-    authCount: stream.authCount,
+  broadcast(sessionId, {
+    type: "session_update",
+    sessionId,
+    status: session.status,
+    totalConsumed: session.totalConsumed.toString(),
+    requestsRemaining: remaining,
+    requestCount: session.requestCount,
+    completedCategories: session.completedCategories,
   });
 }
 
-async function handleCloseStream(
-  ws: WebSocket,
-  msg: Extract<WsMessageIn, { type: "close_stream" }>
+async function handleCloseSession(
+  _ws: WebSocket,
+  msg: Extract<WsMessageIn, { type: "close_session" }>
 ) {
-  const { streamId } = msg;
-  const stream = streamManager.getStream(streamId);
-  if (!stream) {
-    throw new StreamNotFoundError(streamId);
+  const { sessionId } = msg;
+  const session = sessionManager.getSession(sessionId);
+  if (!session) {
+    throw new SessionNotFoundError(sessionId);
   }
 
-  streamManager.updateStatus(streamId, "CLOSING");
+  sessionManager.updateStatus(sessionId, "CLOSING");
 
-  const consumed = stream.totalConsumed;
-  const refund = stream.deposit - consumed;
+  const consumed = session.totalConsumed;
+  const refund = session.deposit - consumed;
 
   let txHash: Hex = "0x0" as Hex;
   if (vaultClient) {
     try {
-      txHash = await vaultClient.closeStream(streamId, consumed);
-      console.log(`[vault] closeStream tx: ${txHash}`);
+      txHash = await vaultClient.closeSession(sessionId);
+      console.log(`[vault] closeSession tx: ${txHash}`);
     } catch (err) {
-      console.error("[vault] closeStream failed:", err);
+      console.error("[vault] closeSession failed:", err);
     }
   }
 
-  streamManager.updateStatus(streamId, "CLOSED");
+  sessionManager.updateStatus(sessionId, "CLOSED");
 
-  broadcast(streamId, {
-    type: "stream_closed",
-    streamId,
+  broadcast(sessionId, {
+    type: "session_closed",
+    sessionId,
     consumed: consumed.toString(),
     refunded: refund.toString(),
     txHash,
   });
 
-  console.log(`[stream] Closed ${streamId} | consumed=${consumed} | refund=${refund}`);
+  console.log(`[session] Closed ${sessionId} | consumed=${consumed} | refund=${refund}`);
 }
 
-function handleSubscribe(ws: WebSocket, streamId: Hex) {
-  if (!subscriptions.has(streamId)) {
-    subscriptions.set(streamId, new Set());
+function handleSubscribe(ws: WebSocket, sessionId: Hex) {
+  if (!subscriptions.has(sessionId)) {
+    subscriptions.set(sessionId, new Set());
   }
-  subscriptions.get(streamId)!.add(ws);
+  subscriptions.get(sessionId)!.add(ws);
 }
 
 // ─── Solvency Watchdog ───
@@ -276,39 +285,41 @@ function handleSubscribe(ws: WebSocket, streamId: Hex) {
 async function checkSolvency() {
   if (!vaultClient) return;
 
-  const activeIds = streamManager.getActiveStreamIds();
-  for (const streamId of activeIds) {
+  const activeIds = sessionManager.getActiveSessionIds();
+  for (const sessionId of activeIds) {
     try {
       const [solvent, remaining] = await Promise.all([
-        vaultClient.isSolvent(streamId),
-        vaultClient.timeRemaining(streamId),
+        vaultClient.isSolvent(sessionId),
+        vaultClient.requestsRemaining(sessionId),
       ]);
 
-      const stream = streamManager.getStream(streamId)!;
+      const session = sessionManager.getSession(sessionId)!;
 
       if (!solvent) {
-        console.log(`[watchdog] Stream ${streamId} is insolvent`);
-        streamManager.updateStatus(streamId, "TERMINATED");
-        broadcast(streamId, {
-          type: "stream_update",
-          streamId,
+        console.log(`[watchdog] Session ${sessionId} budget exhausted`);
+        sessionManager.updateStatus(sessionId, "TERMINATED");
+        broadcast(sessionId, {
+          type: "session_update",
+          sessionId,
           status: "TERMINATED",
-          totalConsumed: stream.totalConsumed.toString(),
-          timeRemaining: 0,
-          authCount: stream.authCount,
+          totalConsumed: session.totalConsumed.toString(),
+          requestsRemaining: 0,
+          requestCount: session.requestCount,
+          completedCategories: session.completedCategories,
         });
       } else {
-        broadcast(streamId, {
-          type: "stream_update",
-          streamId,
+        broadcast(sessionId, {
+          type: "session_update",
+          sessionId,
           status: "ACTIVE",
-          totalConsumed: stream.totalConsumed.toString(),
-          timeRemaining: Number(remaining),
-          authCount: stream.authCount,
+          totalConsumed: session.totalConsumed.toString(),
+          requestsRemaining: Number(remaining),
+          requestCount: session.requestCount,
+          completedCategories: session.completedCategories,
         });
       }
     } catch (err) {
-      console.error(`[watchdog] Error checking ${streamId}:`, err);
+      console.error(`[watchdog] Error checking ${sessionId}:`, err);
     }
   }
 }

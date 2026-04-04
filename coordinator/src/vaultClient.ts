@@ -53,31 +53,32 @@ export class VaultClient {
     });
   }
 
-  async isSolvent(streamId: Hex): Promise<boolean> {
+  async isSolvent(sessionId: Hex): Promise<boolean> {
     return this.publicClient.readContract({
       address: this.vaultAddress,
       abi: streamVaultAbi,
       functionName: "isSolvent",
-      args: [streamId],
+      args: [sessionId],
     });
   }
 
-  async timeRemaining(streamId: Hex): Promise<bigint> {
+  async requestsRemaining(sessionId: Hex): Promise<bigint> {
     return this.publicClient.readContract({
       address: this.vaultAddress,
       abi: streamVaultAbi,
-      functionName: "timeRemaining",
-      args: [streamId],
+      functionName: "requestsRemaining",
+      args: [sessionId],
     });
   }
 
-  async getStream(streamId: Hex) {
+  async getSession(sessionId: Hex) {
     const [
       buyer,
       seller,
-      baseRatePerSecond,
-      effectiveRate,
+      pricePerRequest,
+      effectivePrice,
       depositedAmount,
+      consumedAmount,
       startTime,
       closedTime,
       status,
@@ -85,16 +86,17 @@ export class VaultClient {
     ] = await this.publicClient.readContract({
       address: this.vaultAddress,
       abi: streamVaultAbi,
-      functionName: "streams",
-      args: [streamId],
+      functionName: "sessions",
+      args: [sessionId],
     });
 
     return {
       buyer,
       seller,
-      baseRatePerSecond,
-      effectiveRate,
+      pricePerRequest,
+      effectivePrice,
       depositedAmount,
+      consumedAmount,
       startTime,
       closedTime,
       status,
@@ -102,14 +104,25 @@ export class VaultClient {
     };
   }
 
-  async closeStream(streamId: Hex, actualConsumed: bigint): Promise<Hex> {
+  async reportConsumption(sessionId: Hex, amount: bigint): Promise<Hex> {
     return this.walletClient.writeContract({
       chain: this.walletClient.chain,
       account: this.walletClient.account!,
       address: this.vaultAddress,
       abi: streamVaultAbi,
-      functionName: "closeStream",
-      args: [streamId, actualConsumed],
+      functionName: "reportConsumption",
+      args: [sessionId, amount],
+    });
+  }
+
+  async closeSession(sessionId: Hex): Promise<Hex> {
+    return this.walletClient.writeContract({
+      chain: this.walletClient.chain,
+      account: this.walletClient.account!,
+      address: this.vaultAddress,
+      abi: streamVaultAbi,
+      functionName: "closeSession",
+      args: [sessionId],
     });
   }
 }
