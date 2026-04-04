@@ -13,7 +13,7 @@ contract StreamVaultTest is Test {
     address public buyer = makeAddr("buyer");
     address public seller = makeAddr("seller");
 
-    uint256 public constant RATE = 100; // $0.0001/sec
+    uint256 public constant PRICE = 100; // $0.0001/request
     uint256 public constant DEPOSIT = 1_000_000; // 1 USDC
 
     function setUp() public {
@@ -25,389 +25,457 @@ contract StreamVaultTest is Test {
         usdc.approve(address(vault), type(uint256).max);
     }
 
-    // ==================== openStream ====================
+    // ==================== openSession ====================
 
-    function test_openStream_verified() public {
+    function test_openSession_verified() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, true);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, true);
 
         (
             address sBuyer,
             address sSeller,
-            uint256 sBaseRate,
-            uint256 sEffectiveRate,
+            uint256 sPricePerRequest,
+            uint256 sEffectivePrice,
             uint256 sDeposit,
+            uint256 sConsumed,
             uint256 sStartTime,
             uint256 sClosedTime,
-            StreamVault.StreamStatus sStatus,
+            StreamVault.SessionStatus sStatus,
             bool sVerified
-        ) = vault.streams(streamId);
+        ) = vault.sessions(sessionId);
 
         assertEq(sBuyer, buyer);
         assertEq(sSeller, seller);
-        assertEq(sBaseRate, RATE);
-        assertEq(sEffectiveRate, 80); // 20% discount: 100 * 8000 / 10000
+        assertEq(sPricePerRequest, PRICE);
+        assertEq(sEffectivePrice, 80); // 20% discount: 100 * 8000 / 10000
         assertEq(sDeposit, DEPOSIT);
+        assertEq(sConsumed, 0);
         assertEq(sStartTime, block.timestamp);
         assertEq(sClosedTime, 0);
-        assertEq(uint8(sStatus), uint8(StreamVault.StreamStatus.ACTIVE));
+        assertEq(uint8(sStatus), uint8(StreamVault.SessionStatus.ACTIVE));
         assertTrue(sVerified);
 
         assertEq(usdc.balanceOf(address(vault)), DEPOSIT);
         assertEq(usdc.balanceOf(buyer), 10_000_000 - DEPOSIT);
     }
 
-    function test_openStream_unverified() public {
+    function test_openSession_unverified() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        (,, uint256 sBaseRate, uint256 sEffectiveRate,,,,, bool sVerified) = vault.streams(streamId);
+        (,, uint256 sPricePerRequest, uint256 sEffectivePrice,,,,,, bool sVerified) = vault.sessions(sessionId);
 
-        assertEq(sBaseRate, RATE);
-        assertEq(sEffectiveRate, RATE); // no discount
+        assertEq(sPricePerRequest, PRICE);
+        assertEq(sEffectivePrice, PRICE); // no discount
         assertFalse(sVerified);
+    }
+
+    // ==================== reportConsumption ====================
+
+    function test_reportConsumption() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, true);
+
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, 80);
+
+        (,,,,, uint256 sConsumed,,,,) = vault.sessions(sessionId);
+        assertEq(sConsumed, 80);
+
+        // Report again
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, 80);
+
+        (,,,,, uint256 sConsumed2,,,,) = vault.sessions(sessionId);
+        assertEq(sConsumed2, 160);
+    }
+
+    function test_reportConsumption_onlyCoordinator() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
+
+        vm.prank(buyer);
+        vm.expectRevert(StreamVault.OnlyCoordinator.selector);
+        vault.reportConsumption(sessionId, 100);
+    }
+
+    function test_reportConsumption_exceedsDeposit() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
+
+        vm.prank(coordinator);
+        vm.expectRevert(StreamVault.ConsumedExceedsDeposit.selector);
+        vault.reportConsumption(sessionId, DEPOSIT + 1);
+    }
+
+    function test_reportConsumption_notActive() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
+
+        vm.prank(coordinator);
+        vault.closeSession(sessionId);
+
+        vm.prank(coordinator);
+        vm.expectRevert(StreamVault.NotActive.selector);
+        vault.reportConsumption(sessionId, 100);
     }
 
     // ==================== isSolvent ====================
 
-    function test_isSolvent_active_stream() public {
+    function test_isSolvent_activeSession() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        assertTrue(vault.isSolvent(streamId));
-
-        // After 5000s at rate 100: consumed = 500_000 < 1_000_000
-        vm.warp(block.timestamp + 5000);
-        assertTrue(vault.isSolvent(streamId));
-
-        // After 10000s: consumed = 1_000_000 = deposit (at limit)
-        vm.warp(block.timestamp + 5000);
-        assertFalse(vault.isSolvent(streamId));
+        assertTrue(vault.isSolvent(sessionId));
     }
 
-    function test_isSolvent_verified_lasts_longer() public {
+    function test_isSolvent_afterConsumption() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, true);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        // Effective rate = 80, so 1_000_000 / 80 = 12500s
-        vm.warp(block.timestamp + 12000);
-        assertTrue(vault.isSolvent(streamId));
+        // Consume half
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, 500_000);
+        assertTrue(vault.isSolvent(sessionId));
 
-        vm.warp(block.timestamp + 500);
-        assertFalse(vault.isSolvent(streamId));
+        // Consume rest
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, 500_000);
+        assertFalse(vault.isSolvent(sessionId));
     }
 
-    function test_isSolvent_closedStream() public {
+    function test_isSolvent_closedSession() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
 
-        assertFalse(vault.isSolvent(streamId));
+        assertFalse(vault.isSolvent(sessionId));
     }
 
-    // ==================== timeRemaining ====================
+    // ==================== requestsRemaining ====================
 
-    function test_timeRemaining() public {
+    function test_requestsRemaining() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        // At start: 1_000_000 / 100 = 10000s
-        assertEq(vault.timeRemaining(streamId), 10000);
-
-        // After 3000s: (1_000_000 - 300_000) / 100 = 7000
-        vm.warp(block.timestamp + 3000);
-        assertEq(vault.timeRemaining(streamId), 7000);
-
-        // After insolvency: 0
-        vm.warp(block.timestamp + 8000);
-        assertEq(vault.timeRemaining(streamId), 0);
+        // 1_000_000 / 100 = 10000 requests
+        assertEq(vault.requestsRemaining(sessionId), 10000);
     }
 
-    function test_timeRemaining_closedStream() public {
+    function test_requestsRemaining_verified() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, true);
+
+        // effectivePrice = 80, so 1_000_000 / 80 = 12500 requests
+        assertEq(vault.requestsRemaining(sessionId), 12500);
+    }
+
+    function test_requestsRemaining_afterConsumption() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, 0);
+        vault.reportConsumption(sessionId, 300_000);
 
-        assertEq(vault.timeRemaining(streamId), 0);
+        // (1_000_000 - 300_000) / 100 = 7000
+        assertEq(vault.requestsRemaining(sessionId), 7000);
+    }
+
+    function test_requestsRemaining_closedSession() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
+
+        vm.prank(coordinator);
+        vault.closeSession(sessionId);
+
+        assertEq(vault.requestsRemaining(sessionId), 0);
     }
 
     // ==================== topUp ====================
 
     function test_topUp() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         uint256 topUpAmount = 500_000;
 
         vm.prank(buyer);
-        vault.topUp(streamId, topUpAmount);
+        vault.topUp(sessionId, topUpAmount);
 
-        (,,,, uint256 sDeposit,,,,) = vault.streams(streamId);
+        (,,,, uint256 sDeposit,,,,, ) = vault.sessions(sessionId);
         assertEq(sDeposit, DEPOSIT + topUpAmount);
         assertEq(usdc.balanceOf(address(vault)), DEPOSIT + topUpAmount);
     }
 
-    function test_topUp_extends_time() public {
+    function test_topUp_extendsRequests() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        assertEq(vault.timeRemaining(streamId), 10000);
+        assertEq(vault.requestsRemaining(sessionId), 10000);
 
         vm.prank(buyer);
-        vault.topUp(streamId, DEPOSIT); // double deposit
+        vault.topUp(sessionId, DEPOSIT); // double deposit
 
-        assertEq(vault.timeRemaining(streamId), 20000);
+        assertEq(vault.requestsRemaining(sessionId), 20000);
     }
 
-    function test_topUp_after_partial_consumption() public {
+    function test_topUp_afterPartialConsumption() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        // 5000s pass → consumed 500_000
-        vm.warp(block.timestamp + 5000);
-        assertEq(vault.timeRemaining(streamId), 5000);
+        // Consume 500_000
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, 500_000);
+        assertEq(vault.requestsRemaining(sessionId), 5000);
 
         // Top up 1 USDC
         vm.prank(buyer);
-        vault.topUp(streamId, DEPOSIT);
+        vault.topUp(sessionId, DEPOSIT);
 
-        // Remaining = (2_000_000 - 500_000) / 100 = 15000
-        assertEq(vault.timeRemaining(streamId), 15000);
+        // (2_000_000 - 500_000) / 100 = 15000
+        assertEq(vault.requestsRemaining(sessionId), 15000);
     }
 
     function test_topUp_onlyBuyer() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(seller);
         vm.expectRevert(StreamVault.OnlyBuyer.selector);
-        vault.topUp(streamId, 500_000);
+        vault.topUp(sessionId, 500_000);
     }
 
     function test_topUp_onlyActive() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
 
         vm.prank(buyer);
         vm.expectRevert(StreamVault.NotActive.selector);
-        vault.topUp(streamId, 500_000);
+        vault.topUp(sessionId, 500_000);
     }
 
-    // ==================== closeStream ====================
+    // ==================== closeSession ====================
 
-    function test_closeStream_partial() public {
+    function test_closeSession_partialConsumption() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         uint256 consumed = 300_000;
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, consumed);
+
         uint256 buyerBefore = usdc.balanceOf(buyer);
         uint256 sellerBefore = usdc.balanceOf(seller);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, consumed);
+        vault.closeSession(sessionId);
 
         assertEq(usdc.balanceOf(seller), sellerBefore + consumed);
         assertEq(usdc.balanceOf(buyer), buyerBefore + (DEPOSIT - consumed));
         assertEq(usdc.balanceOf(address(vault)), 0);
 
-        (,,,,,, uint256 sClosedTime, StreamVault.StreamStatus sStatus,) = vault.streams(streamId);
-        assertEq(uint8(sStatus), uint8(StreamVault.StreamStatus.CLOSED));
+        (,,,,,,, uint256 sClosedTime, StreamVault.SessionStatus sStatus,) = vault.sessions(sessionId);
+        assertEq(uint8(sStatus), uint8(StreamVault.SessionStatus.CLOSED));
         assertGt(sClosedTime, 0);
     }
 
-    function test_closeStream_full_consumption() public {
+    function test_closeSession_fullConsumption() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, DEPOSIT);
+        vault.reportConsumption(sessionId, DEPOSIT);
+
+        vm.prank(coordinator);
+        vault.closeSession(sessionId);
 
         assertEq(usdc.balanceOf(seller), DEPOSIT);
         assertEq(usdc.balanceOf(address(vault)), 0);
     }
 
-    function test_closeStream_zero_consumption() public {
+    function test_closeSession_zeroConsumption() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         uint256 buyerBefore = usdc.balanceOf(buyer);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
 
         assertEq(usdc.balanceOf(buyer), buyerBefore + DEPOSIT);
         assertEq(usdc.balanceOf(seller), 0);
     }
 
-    function test_closeStream_onlyCoordinator() public {
+    function test_closeSession_onlyCoordinator() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(buyer);
         vm.expectRevert(StreamVault.OnlyCoordinator.selector);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
     }
 
-    function test_closeStream_consumedExceedsDeposit() public {
+    function test_closeSession_notActive() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vm.expectRevert(StreamVault.ConsumedExceedsDeposit.selector);
-        vault.closeStream(streamId, DEPOSIT + 1);
-    }
-
-    function test_closeStream_notActive() public {
-        vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
-
-        vm.prank(coordinator);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
 
         vm.prank(coordinator);
         vm.expectRevert(StreamVault.NotActive.selector);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
     }
 
-    // ==================== terminateInsolvency ====================
+    // ==================== terminateExpired ====================
 
-    function test_terminateInsolvency() public {
+    function test_terminateExpired() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        // Rate=100, deposit=1_000_000 → insolvency at 10000s
-        // Grace period = 30s → terminable at 10030s
-        vm.warp(block.timestamp + 10031);
+        // Warp past MAX_SESSION_DURATION (3600s)
+        vm.warp(block.timestamp + 3601);
 
-        uint256 sellerBefore = usdc.balanceOf(seller);
+        uint256 buyerBefore = usdc.balanceOf(buyer);
 
         address anyone = makeAddr("anyone");
         vm.prank(anyone);
-        vault.terminateInsolvency(streamId);
+        vault.terminateExpired(sessionId);
 
-        assertEq(usdc.balanceOf(seller), sellerBefore + DEPOSIT);
+        // Zero consumed → full refund to buyer
+        assertEq(usdc.balanceOf(buyer), buyerBefore + DEPOSIT);
+        assertEq(usdc.balanceOf(seller), 0);
         assertEq(usdc.balanceOf(address(vault)), 0);
 
-        (,,,,,, uint256 sClosedTime, StreamVault.StreamStatus sStatus,) = vault.streams(streamId);
-        assertEq(uint8(sStatus), uint8(StreamVault.StreamStatus.TERMINATED));
-        // closedTime at insolvency point, not call time
-        assertEq(sClosedTime, 1 + 10000); // block.timestamp starts at 1 in Foundry
+        (,,,,,,, uint256 sClosedTime, StreamVault.SessionStatus sStatus,) = vault.sessions(sessionId);
+        assertEq(uint8(sStatus), uint8(StreamVault.SessionStatus.TERMINATED));
+        assertGt(sClosedTime, 0);
     }
 
-    function test_terminateInsolvency_stillSolvent() public {
+    function test_terminateExpired_withConsumption() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        vm.warp(block.timestamp + 5000);
+        // Report some consumption
+        uint256 consumed = 400_000;
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, consumed);
 
-        vm.expectRevert(StreamVault.StillSolvent.selector);
-        vault.terminateInsolvency(streamId);
+        // Warp past MAX_SESSION_DURATION
+        vm.warp(block.timestamp + 3601);
+
+        uint256 buyerBefore = usdc.balanceOf(buyer);
+        uint256 sellerBefore = usdc.balanceOf(seller);
+
+        vault.terminateExpired(sessionId);
+
+        assertEq(usdc.balanceOf(seller), sellerBefore + consumed);
+        assertEq(usdc.balanceOf(buyer), buyerBefore + (DEPOSIT - consumed));
+        assertEq(usdc.balanceOf(address(vault)), 0);
     }
 
-    function test_terminateInsolvency_gracePeriodActive() public {
+    function test_terminateExpired_sessionNotExpired() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        vm.warp(block.timestamp + 10015); // insolvent but within grace
+        vm.warp(block.timestamp + 1800); // only 30 min, not 1 hour
 
-        vm.expectRevert(StreamVault.GracePeriodActive.selector);
-        vault.terminateInsolvency(streamId);
+        vm.expectRevert(StreamVault.SessionNotExpired.selector);
+        vault.terminateExpired(sessionId);
     }
 
-    function test_terminateInsolvency_verified_timing() public {
+    function test_terminateExpired_notActive() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, true);
-
-        // Effective rate = 80 → insolvency at 1_000_000/80 = 12500s
-        vm.warp(block.timestamp + 12500);
-
-        vm.expectRevert(StreamVault.StillSolvent.selector);
-        vault.terminateInsolvency(streamId);
-
-        vm.warp(block.timestamp + 31); // past grace
-        vault.terminateInsolvency(streamId);
-
-        (,,,,,,, StreamVault.StreamStatus sStatus,) = vault.streams(streamId);
-        assertEq(uint8(sStatus), uint8(StreamVault.StreamStatus.TERMINATED));
-    }
-
-    function test_terminateInsolvency_notActive() public {
-        vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vault.closeStream(streamId, 0);
+        vault.closeSession(sessionId);
 
-        vm.warp(block.timestamp + 20000);
+        vm.warp(block.timestamp + 3601);
         vm.expectRevert(StreamVault.NotActive.selector);
-        vault.terminateInsolvency(streamId);
+        vault.terminateExpired(sessionId);
     }
 
     // ==================== Events ====================
 
-    function test_event_StreamOpened() public {
+    function test_event_SessionOpened() public {
         vm.prank(buyer);
         vm.expectEmit(false, false, false, true);
-        emit StreamVault.StreamOpened(bytes32(0), buyer, seller, RATE, 80, DEPOSIT, true);
+        emit StreamVault.SessionOpened(bytes32(0), buyer, seller, PRICE, 80, DEPOSIT, true);
 
-        vault.openStream(seller, RATE, DEPOSIT, true);
+        vault.openSession(seller, PRICE, DEPOSIT, true);
     }
 
-    function test_event_StreamClosed() public {
+    function test_event_ConsumptionReported() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(coordinator);
         vm.expectEmit(true, false, false, true);
-        emit StreamVault.StreamClosed(streamId, 300_000, 700_000);
+        emit StreamVault.ConsumptionReported(sessionId, 100, 100);
 
-        vault.closeStream(streamId, 300_000);
+        vault.reportConsumption(sessionId, 100);
     }
 
-    function test_event_StreamToppedUp() public {
+    function test_event_SessionClosed() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
+
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, 300_000);
+
+        vm.prank(coordinator);
+        vm.expectEmit(true, false, false, true);
+        emit StreamVault.SessionClosed(sessionId, 300_000, 700_000);
+
+        vault.closeSession(sessionId);
+    }
+
+    function test_event_SessionToppedUp() public {
+        vm.prank(buyer);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
         vm.prank(buyer);
         vm.expectEmit(true, false, false, true);
-        emit StreamVault.StreamToppedUp(streamId, 500_000, DEPOSIT + 500_000);
+        emit StreamVault.SessionToppedUp(sessionId, 500_000, DEPOSIT + 500_000);
 
-        vault.topUp(streamId, 500_000);
+        vault.topUp(sessionId, 500_000);
     }
 
-    function test_event_StreamTerminated() public {
+    function test_event_SessionTerminated() public {
         vm.prank(buyer);
-        bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 sessionId = vault.openSession(seller, PRICE, DEPOSIT, false);
 
-        vm.warp(block.timestamp + 10031);
+        vm.prank(coordinator);
+        vault.reportConsumption(sessionId, DEPOSIT);
+
+        vm.warp(block.timestamp + 3601);
 
         vm.expectEmit(true, false, false, true);
-        emit StreamVault.StreamTerminated(streamId, DEPOSIT, 0);
+        emit StreamVault.SessionTerminated(sessionId, DEPOSIT, 0);
 
-        vault.terminateInsolvency(streamId);
+        vault.terminateExpired(sessionId);
     }
 
-    // ==================== Multiple streams ====================
+    // ==================== Multiple sessions ====================
 
-    function test_multiple_streams() public {
+    function test_multipleSessions() public {
         vm.startPrank(buyer);
-        bytes32 id1 = vault.openStream(seller, RATE, DEPOSIT, true);
-        bytes32 id2 = vault.openStream(seller, RATE, DEPOSIT, false);
+        bytes32 id1 = vault.openSession(seller, PRICE, DEPOSIT, true);
+        bytes32 id2 = vault.openSession(seller, PRICE, DEPOSIT, false);
         vm.stopPrank();
 
         assertTrue(id1 != id2);
 
-        (,,, uint256 rate1,,,,,) = vault.streams(id1);
-        (,,, uint256 rate2,,,,,) = vault.streams(id2);
+        (,,, uint256 price1,,,,,,) = vault.sessions(id1);
+        (,,, uint256 price2,,,,,,) = vault.sessions(id2);
 
-        assertEq(rate1, 80);  // verified discount
-        assertEq(rate2, 100); // no discount
+        assertEq(price1, 80);  // verified discount
+        assertEq(price2, 100); // no discount
     }
 }
