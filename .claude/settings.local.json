@@ -22,7 +22,14 @@
       "WebFetch(domain:developers.circle.com)",
       "WebFetch(domain:owasp.org)",
       "WebFetch(domain:swcregistry.io)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(DEEPSEEK_API_KEY= timeout 8 npx tsx src/index.ts)",
+      "Bash(curl -s -X POST http://localhost:3002/api/audit/reentrancy -H \"payment-signature: test\" -H \"Content-Type: application/json\" -d '{}')",
+      "Read(//home/mbarr/Cannes2026/**)"
     ]
   }
 }

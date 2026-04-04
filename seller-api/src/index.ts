@@ -59,17 +59,11 @@ async function handleAuditCategory(
     contractSource = SAMPLE_CONTRACT;
   }
 
-  // SSE response
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-
   let findings: AuditFinding[];
   let source: "deepseek" | "fallback";
 
   // Try DeepSeek first, fall back to pre-written findings
+  // First pass is always standard; deep mode adds a second pass with a different angle
   try {
     findings = await analyzeWithDeepSeek(contractSource, category, false);
     source = "deepseek";
@@ -96,6 +90,13 @@ async function handleAuditCategory(
       console.warn(`[audit/${category}] Deep scan failed:`, err instanceof Error ? err.message : err);
     }
   }
+
+  // SSE response — headers sent after findings are resolved so errors can return 500
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
 
   for (const finding of findings) {
     res.write(`data: ${JSON.stringify(finding)}\n\n`);
