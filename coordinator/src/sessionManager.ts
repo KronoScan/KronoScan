@@ -16,6 +16,7 @@ export interface RegisterSessionParams {
   deposit: bigint;
   verified: boolean;
   startTime: number;
+  ensName?: string;
 }
 
 export class SessionManager {
@@ -39,6 +40,7 @@ export class SessionManager {
       requestCount: 0,
       totalConsumed: 0n,
       completedCategories: [],
+      ensName: params.ensName,
     };
 
     this.sessions.set(params.sessionId, session);

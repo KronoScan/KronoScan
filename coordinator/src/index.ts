@@ -182,6 +182,7 @@ async function handleOpenSession(
     deposit,
     verified: msg.verified,
     startTime: Math.floor(Date.now() / 1000),
+    ensName: msg.ensName,
   });
 
   handleSubscribe(ws, sessionId);
@@ -192,9 +193,10 @@ async function handleOpenSession(
     effectivePrice: session.effectivePrice.toString(),
     deposit: session.deposit.toString(),
     startTime: session.startTime,
+    ensName: session.ensName,
   });
 
-  console.log(`[session] Opened ${sessionId} | price=${effectivePrice} | deposit=${deposit} | verified=${msg.verified}`);
+  console.log(`[session] Opened ${sessionId} | price=${effectivePrice} | deposit=${deposit} | verified=${msg.verified} | ens=${msg.ensName ?? "none"}`);
 }
 
 async function handleRecordPayment(

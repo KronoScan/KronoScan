@@ -22,18 +22,19 @@ export interface ActiveSession {
   requestCount: number;
   totalConsumed: bigint;
   completedCategories: string[];
+  ensName?: string;
 }
 
 // ─── WebSocket Messages ───
 
 export type WsMessageIn =
-  | { type: "open_session"; seller: Address; pricePerRequest: string; deposit: string; verified: boolean }
+  | { type: "open_session"; seller: Address; pricePerRequest: string; deposit: string; verified: boolean; ensName?: string }
   | { type: "record_payment"; sessionId: Hex; category: string; amount: string }
   | { type: "close_session"; sessionId: Hex }
   | { type: "subscribe"; sessionId: Hex };
 
 export type WsMessageOut =
-  | { type: "session_opened"; sessionId: Hex; effectivePrice: string; deposit: string; startTime: number }
+  | { type: "session_opened"; sessionId: Hex; effectivePrice: string; deposit: string; startTime: number; ensName?: string }
   | { type: "session_update"; sessionId: Hex; status: SessionStatus; totalConsumed: string; requestsRemaining: number; requestCount: number; completedCategories: string[] }
   | { type: "session_closed"; sessionId: Hex; consumed: string; refunded: string; txHash: Hex }
   | { type: "finding"; sessionId: Hex; finding: AuditFinding }

@@ -110,13 +110,14 @@ export class CoordinatorClient {
     });
   }
 
-  async openSession(seller: Address, pricePerRequest: string, deposit: string, verified: boolean): Promise<SessionOpenedMsg> {
+  async openSession(seller: Address, pricePerRequest: string, deposit: string, verified: boolean, ensName?: string): Promise<SessionOpenedMsg> {
     this.send({
       type: "open_session",
       seller,
       pricePerRequest,
       deposit,
       verified,
+      ensName,
     });
     const msg = await this.waitFor("session_opened");
     return msg as SessionOpenedMsg;
