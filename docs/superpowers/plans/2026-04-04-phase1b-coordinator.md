@@ -44,7 +44,7 @@ Create `coordinator/package.json`:
 
 ```json
 {
-  "name": "streampay-coordinator",
+  "name": "kronoscan-coordinator",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -1,8 +1,8 @@
-# StreamPay — CLAUDE.md
+# KronoScan — CLAUDE.md
 
 ## What is this file?
 
-This is the master context file for the StreamPay project. It contains everything you need to understand what we're building, why, and how. Read this fully before doing anything.
+This is the master context file for the KronoScan project. It contains everything you need to understand what we're building, why, and how. Read this fully before doing anything.
 
 ---
 
@@ -55,7 +55,7 @@ Martin uses Claude Chat for architecture/brainstorming and Claude Code for imple
 
 ---
 
-## The Project: StreamPay — Verified Agent Commerce
+## The Project: KronoScan — Verified Agent Commerce
 
 ### One-sentence pitch
 
@@ -67,7 +67,7 @@ Smart contract audits are expensive ($5K-$50K), slow (weeks), and gatekept. AI-p
 
 ### The solution
 
-StreamPay is a per-second payment streaming primitive for AI agents, built on Circle Nanopayments and deployed on Arc blockchain. The first application: **AI-powered smart contract security auditing**, where agents pay per second of actual scan time.
+KronoScan is a per-second payment streaming primitive for AI agents, built on Circle Nanopayments and deployed on Arc blockchain. The first application: **AI-powered smart contract security auditing**, where agents pay per second of actual scan time.
 
 It adds three layers that Nanopayments alone doesn't provide:
 
@@ -116,7 +116,7 @@ We are targeting **Arc + World + ENS** as our 3 sponsors (max allowed).
 - **Circle Nanopayments** — Gas-free sub-cent USDC transfers via batched settlement. Minimum payment: $0.000001. Uses EIP-3009 `TransferWithAuthorization` signatures offchain, batched into single on-chain transactions.
 - **x402 protocol** — HTTP-native payment negotiation. Server returns `402 Payment Required` with price/terms. Client responds with signed payment. Stateless, agent-friendly.
 - **World AgentKit** — SDK for verifying that agents are backed by unique humans via World ID proofs.
-- **ENS** — Human-readable names for agents and services (e.g., `audit.streampay.eth` instead of `0x7f3a...`).
+- **ENS** — Human-readable names for agents and services (e.g., `audit.kronoscan.eth` instead of `0x7f3a...`).
 
 ### Our stack
 
@@ -135,7 +135,7 @@ We are targeting **Arc + World + ENS** as our 3 sponsors (max allowed).
 │                    (TypeScript demo script)                     │
 │                                                                 │
 │  1. Agent has a task: "Audit this smart contract" (source or address) │
-│  2. Agent resolves seller via ENS: audit.streampay.eth         │
+│  2. Agent resolves seller via ENS: audit.kronoscan.eth         │
 │  3. Agent hits seller's API → receives 402 Payment Required    │
 │  4. Agent opens a stream on StreamVault (deposits USDC)        │
 │  5. Every second: signs EIP-3009 authorization, sends to       │
@@ -179,7 +179,7 @@ We are targeting **Arc + World + ENS** as our 3 sponsors (max allowed).
 │                    (Next.js — THE DEMO CENTERPIECE)             │
 │                                                                 │
 │  - Agent World ID verification status: "Verified ✅"           │
-│  - Service discovered via ENS: audit.streampay.eth             │
+│  - Service discovered via ENS: audit.kronoscan.eth             │
 │  - Live cost meter: $0.0000 ticking up per second              │
 │  - Rate: base vs effective (verified discount visible)         │
 │  - Time remaining countdown (from timeRemaining() view)        │
@@ -188,7 +188,7 @@ We are targeting **Arc + World + ENS** as our 3 sponsors (max allowed).
 │  - Streaming vulnerability findings with severity badges       │
 │  - Refund display: "$0.9953 returned to agent wallet"          │
 │  - ArcScan transaction links                                   │
-│  - Cost comparison: "Traditional audit: $5K+ vs StreamPay: $0.02" │
+│  - Cost comparison: "Traditional audit: $5K+ vs KronoScan: $0.02" │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -432,7 +432,7 @@ app.post('/api/audit', async (req, res) => {
             baseRatePerSecond: 100,  // $0.0001/sec in USDC micro-units
             network: 'arc-testnet',
             sellerAddress: '0x...',
-            sellerENS: 'audit.streampay.eth',
+            sellerENS: 'audit.kronoscan.eth',
             acceptsUnverified: true,
             coordinatorUrl: 'ws://localhost:3001'
         });
@@ -492,7 +492,7 @@ async function runAuditAgent() {
     const worldIdVerified = await verifyWorldId(agentOwnerProof);
     
     // 2. Resolve audit service via ENS
-    const sellerAddress = await ensProvider.resolveName('audit.streampay.eth');
+    const sellerAddress = await ensProvider.resolveName('audit.kronoscan.eth');
     
     // 3. Submit contract for audit → get 402 response with pricing
     const pricingInfo = await probeService('https://seller-api/audit');
@@ -545,7 +545,7 @@ The demo centerpiece. This is what judges see and remember.
 
 Top section:
 - Agent identity: wallet address + "World ID Verified" badge
-- Service target: `audit.streampay.eth` (ENS name, resolved)
+- Service target: `audit.kronoscan.eth` (ENS name, resolved)
 - **Contract input:** Toggle between "Paste Source" (textarea) and "On-Chain Address" (address input + chain selector). For address mode, fetched source is displayed after resolution.
 - Target contract: resolved or pasted Solidity source displayed
 
@@ -569,7 +569,7 @@ End state:
 - Total cost: $0.0024 (with verified discount)
 - Refund: $0.9976
 - Settlement tx + Refund tx links to ArcScan
-- Comparison: "Traditional audit: $5,000+ / 2 weeks | StreamPay: $0.0024 / 30 seconds"
+- Comparison: "Traditional audit: $5,000+ / 2 weeks | KronoScan: $0.0024 / 30 seconds"
 
 **Tech:** Next.js app. Uses WebSocket or polling to the Coordinator for real-time stream state updates. SSE connection to seller API for the streaming text.
 
@@ -585,7 +585,7 @@ This is the exact flow Martin will present to judges:
 
 **[0:10]** Click "Run Audit". Dashboard shows:
 ```
-🔍 Resolving service... audit.streampay.eth → 0x7f3a...
+🔍 Resolving service... audit.kronoscan.eth → 0x7f3a...
 📨 Received 402 Payment Required — Base rate: $0.0001/sec
 🌐 Agent verified via World ID ✅
 💳 Opening stream... Verified discount applied: $0.00008/sec (20% off)
@@ -615,14 +615,14 @@ This is the exact flow Martin will present to judges:
 
 **[1:05]** Click through ArcScan links. Show the StreamOpened event (with effectiveRate vs baseRate) and refund transaction.
 
-*"Everything on-chain. The audit, the payments, the refund — all verifiable on Arc. And the agent's World ID proof means a real human is accountable for these findings. When AI auditing tools compete on price, StreamPay is the payment layer."*
+*"Everything on-chain. The audit, the payments, the refund — all verifiable on Arc. And the agent's World ID proof means a real human is accountable for these findings. When AI auditing tools compete on price, KronoScan is the payment layer."*
 
 ---
 
 ## ENS Integration Details
 
 **What to build:**
-- Audit services register ENS subnames under a StreamPay parent (e.g., `audit.streampay.eth`)
+- Audit services register ENS subnames under a KronoScan parent (e.g., `audit.kronoscan.eth`)
 - Multiple audit services could register: `slither.audit.eth`, `mythril.audit.eth` — service discovery for the agentic economy
 - The coordinator resolves ENS names to addresses when buyers specify a service by name
 - The dashboard displays ENS names instead of raw addresses throughout
@@ -710,7 +710,7 @@ Martin's previous project (https://github.com/MBarralDevs/StabL) built an intent
 - `BatchSettler.sol` — atomic batch execution
 - TypeScript backend with Redis Streams for event-driven processing
 
-**Patterns that transfer to StreamPay:**
+**Patterns that transfer to KronoScan:**
 - SafeERC20 deposit/withdrawal patterns from IntentVault → StreamVault
 - Event-driven TypeScript backend architecture → Coordinator
 - Arc testnet deployment pipeline (already configured)
@@ -721,7 +721,7 @@ Martin's previous project (https://github.com/MBarralDevs/StabL) built an intent
 ## File Structure (Suggested)
 
 ```
-streampay/
+kronoscan/
 ├── src/                        # Solidity contracts (Foundry convention)
 │   └── StreamVault.sol
 ├── test/                       # Solidity tests (Foundry convention)
@@ -749,7 +749,7 @@ streampay/
 ├── agent/
 │   ├── src/
 │   │   ├── index.ts          # Demo audit agent script
-│   │   ├── streamClient.ts   # StreamPay client SDK
+│   │   ├── streamClient.ts   # KronoScan client SDK
 │   │   ├── wallet.ts         # Agent wallet management
 │   │   └── sampleContract.ts # Vulnerable Solidity contract for demo
 │   └── package.json
@@ -796,11 +796,11 @@ Build in this order. Each step produces a demoable increment.
 **Milestone:** World ID badge visible in demo flow.
 
 ### Phase 4: ENS (Days 8-9)
-10. Audit service ENS name registration (`audit.streampay.eth`)
+10. Audit service ENS name registration (`audit.kronoscan.eth`)
 11. ENS resolution in coordinator + ENSIP-25 agent registry text records
 12. ENS names displayed in dashboard instead of addresses
 
-**Milestone:** `audit.streampay.eth` visible in demo flow.
+**Milestone:** `audit.kronoscan.eth` visible in demo flow.
 
 ### Phase 5: Polish (Day 10)
 13. Demo script rehearsal

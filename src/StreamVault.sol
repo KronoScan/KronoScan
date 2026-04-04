@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title StreamVault — Per-second payment streaming with verified identity pricing
-/// @notice On-chain referee for StreamPay. Manages deposits, solvency, tiered pricing,
+/// @notice On-chain referee for KronoScan. Manages deposits, solvency, tiered pricing,
 ///         top-ups, auto-termination with grace period, and refunds.
 contract StreamVault {
     using SafeERC20 for IERC20;

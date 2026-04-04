@@ -1,4 +1,4 @@
-# StreamPay Design Spec
+# KronoScan Design Spec
 
 **Date:** 2026-04-04
 **Author:** Martin (solo dev) + Claude Code
@@ -9,13 +9,13 @@
 
 ## 1. What We're Building
 
-StreamPay is a per-second payment streaming protocol for AI agents, deployed on Arc blockchain. The demo use case: **AI-powered smart contract security auditing** — an agent pays per second of scan time to audit a Solidity contract for vulnerabilities.
+KronoScan is a per-second payment streaming protocol for AI agents, deployed on Arc blockchain. The demo use case: **AI-powered smart contract security auditing** — an agent pays per second of scan time to audit a Solidity contract for vulnerabilities.
 
 The protocol extends x402 (Circle's HTTP-native payment protocol) from per-request to per-second streaming. This is the novel contribution.
 
 ### Core Value Proposition
 
-| | Traditional Audit | Flat-Fee API | StreamPay |
+| | Traditional Audit | Flat-Fee API | KronoScan |
 |---|---|---|---|
 | Cost | $5,000+ | $0.05 per call | $0.0024 (pay for 30s used) |
 | Time | 2 weeks | Instant | Instant |
@@ -31,7 +31,7 @@ The protocol extends x402 (Circle's HTTP-native payment protocol) from per-reque
 ### Three-Layer Payment Stack
 
 ```
-Layer 3: StreamPay Streaming    (our code — per-second tick loop)
+Layer 3: KronoScan Streaming    (our code — per-second tick loop)
 Layer 2: x402 Protocol          (handshake — price discovery + initial auth)
 Layer 1: Circle Gateway         (infrastructure — deposit, settlement, withdrawal)
 ```
@@ -40,7 +40,7 @@ Layer 1: Circle Gateway         (infrastructure — deposit, settlement, withdra
 
 **Layer 2 — x402 Handshake:** Buyer hits seller endpoint, gets `402 Payment Required` with pricing. Signs initial EIP-3009 authorization. Connection opens.
 
-**Layer 3 — StreamPay Streaming:** Every second, buyer signs a new EIP-3009 authorization and sends to Coordinator via WebSocket. Coordinator validates, checks solvency on-chain, collects signatures for batch settlement. Seller streams findings via SSE as long as payment flows.
+**Layer 3 — KronoScan Streaming:** Every second, buyer signs a new EIP-3009 authorization and sends to Coordinator via WebSocket. Coordinator validates, checks solvency on-chain, collects signatures for batch settlement. Seller streams findings via SSE as long as payment flows.
 
 ### Five Components
 
@@ -186,7 +186,7 @@ In-memory `Map<string, ActiveStream>`. No database. Single process.
   "baseRatePerSecond": 100,
   "network": "arc-testnet",
   "sellerAddress": "0x...",
-  "sellerENS": "audit.streampay.eth",
+  "sellerENS": "audit.kronoscan.eth",
   "acceptsUnverified": true,
   "coordinatorUrl": "ws://localhost:3001"
 }
@@ -239,7 +239,7 @@ Trust tiers: verified agents get full detailed findings, unverified agents could
 ### Flow
 
 1. World ID verification (IDKitWidget proof pre-stored or Cloud API)
-2. ENS resolution: `audit.streampay.eth` → seller address (viem on Sepolia)
+2. ENS resolution: `audit.kronoscan.eth` → seller address (viem on Sepolia)
 3. Service discovery: POST to seller → get 402 with pricing
 4. Gateway deposit: USDC into Gateway Wallet on Arc (one-time, may already be done)
 5. Open stream: `StreamVault.openStream()` with deposit, rate, verification boolean
@@ -259,12 +259,12 @@ Single-page Next.js app. The demo centerpiece.
 
 ### Layout
 
-**Header:** StreamPay logo, "Arc Testnet" network indicator
+**Header:** KronoScan logo, "Arc Testnet" network indicator
 
 **Agent Identity Card:**
 - Wallet address (truncated)
 - World ID status: "Verified" (green) or "Unverified" (yellow)
-- Target: `audit.streampay.eth` (ENS name with resolved address tooltip)
+- Target: `audit.kronoscan.eth` (ENS name with resolved address tooltip)
 
 **Contract Input Panel:** Toggle between "Paste Source" (textarea) and "On-Chain Address" (address input + chain selector). For address mode, the resolved source is displayed after fetch. Shows "Fetching verified source..." during resolution.
 
@@ -288,7 +288,7 @@ Single-page Next.js app. The demo centerpiece.
 - Total cost: $0.0024
 - Refund: $0.9976
 - ArcScan links (StreamOpened event + refund tx)
-- Comparison: "Traditional audit: $5,000+ / 2 weeks | StreamPay: $0.0024 / 30 seconds"
+- Comparison: "Traditional audit: $5,000+ / 2 weeks | KronoScan: $0.0024 / 30 seconds"
 
 ### Tech
 
@@ -304,15 +304,15 @@ Single-page Next.js app. The demo centerpiece.
 
 ### What Gets Registered (Sepolia testnet)
 
-- `audit.streampay.eth` — the mock audit service
+- `audit.kronoscan.eth` — the mock audit service
 - Text records:
   - `description`: "AI-powered smart contract security scanner"
   - `url`: seller API endpoint
-  - `agent-registration[streampay][audit-1]`: ENSIP-25 agent registry entry
+  - `agent-registration[kronoscan][audit-1]`: ENSIP-25 agent registry entry
 
 ### Resolution Flow
 
-1. Buyer agent resolves `audit.streampay.eth` via viem ENS on Sepolia
+1. Buyer agent resolves `audit.kronoscan.eth` via viem ENS on Sepolia
 2. Gets seller address + reads text records for metadata
 3. Dashboard displays ENS name everywhere
 
@@ -383,7 +383,7 @@ Single-page Next.js app. The demo centerpiece.
 
 **[0:10]** Click "Run Audit".
 ```
-Resolving audit.streampay.eth → 0x7f3a...
+Resolving audit.kronoscan.eth → 0x7f3a...
 402 Payment Required — Base rate: $0.0001/sec
 World ID Verified — discount applied: $0.00008/sec (20% off)
 Stream opened [ArcScan link]
@@ -404,7 +404,7 @@ Traditional audit: $5,000+ / 2 weeks
 ## 12. File Structure
 
 ```
-streampay/
+kronoscan/
 ├── src/StreamVault.sol
 ├── test/StreamVault.t.sol
 ├── script/Deploy.s.sol
@@ -427,7 +427,7 @@ streampay/
 ├── agent/
 │   └── src/
 │       ├── index.ts                # Demo audit agent
-│       ├── streamClient.ts         # StreamPay client SDK
+│       ├── streamClient.ts         # KronoScan client SDK
 │       ├── wallet.ts               # Agent wallet management
 │       └── sampleContract.ts       # Vulnerable contract for demo
 ├── frontend/
@@ -471,11 +471,11 @@ streampay/
 **Milestone:** World ID badge + discount visible in demo flow.
 
 ### Phase 4: ENS (Days 8-9)
-11. Register `audit.streampay.eth` on Sepolia + ENSIP-25 text records
+11. Register `audit.kronoscan.eth` on Sepolia + ENSIP-25 text records
 12. ENS resolution in coordinator
 13. ENS names in dashboard
 
-**Milestone:** `audit.streampay.eth` visible in demo flow.
+**Milestone:** `audit.kronoscan.eth` visible in demo flow.
 
 ### Phase 5: Polish (Day 10)
 14. Demo script rehearsal
@@ -503,7 +503,7 @@ streampay/
 - [ ] StreamVault deployed on Arc testnet with all 6 functions working
 - [ ] Tiered pricing visible: verified vs unverified rate difference shown in dashboard
 - [ ] World ID verification via IDKitWidget working
-- [ ] ENS resolution working: `audit.streampay.eth` displayed, not raw address
+- [ ] ENS resolution working: `audit.kronoscan.eth` displayed, not raw address
 - [ ] Cost comparison compelling: "$5K+ / 2 weeks vs $0.0024 / 30 seconds"
 - [ ] ArcScan links work and show real on-chain events
 - [ ] 90-second demo rehearsed and smooth
