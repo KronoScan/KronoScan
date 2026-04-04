@@ -18,7 +18,11 @@
       "Bash(curl -s http://localhost:3001/health)",
       "Bash(npx tsx -e ':*)",
       "Bash(npx tsx:*)",
-      "Bash(pkill -f \"tsx src/index.ts\")"
+      "Bash(pkill -f \"tsx src/index.ts\")",
+      "WebFetch(domain:developers.circle.com)",
+      "WebFetch(domain:owasp.org)",
+      "WebFetch(domain:swcregistry.io)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

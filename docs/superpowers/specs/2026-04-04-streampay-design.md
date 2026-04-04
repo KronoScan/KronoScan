@@ -9,17 +9,19 @@
 
 ## 1. What We're Building
 
-KronoScan is a per-second payment streaming protocol for AI agents, deployed on Arc blockchain. The demo use case: **AI-powered smart contract security auditing** — an agent pays per second of scan time to audit a Solidity contract for vulnerabilities.
+KronoScan is a per-request payment protocol for AI agents, deployed on Arc blockchain using Circle Nanopayments (x402). The demo use case: **AI-powered smart contract security auditing** — an agent pays per audit category via x402 micropayments, with an on-chain escrow vault managing deposits, identity-based pricing, and automatic refunds.
 
-The protocol extends x402 (Circle's HTTP-native payment protocol) from per-request to per-second streaming. This is the novel contribution.
+The protocol combines two primitives:
+- **x402 Nanopayments** — real Circle micropayments for each audit request (`GatewayClient.pay()`)
+- **StreamVault** — on-chain escrow with identity-conditioned pricing, top-up, session timeout, and automatic refunds
 
 ### Core Value Proposition
 
 | | Traditional Audit | Flat-Fee API | KronoScan |
 |---|---|---|---|
-| Cost | $5,000+ | $0.05 per call | $0.0024 (pay for 30s used) |
+| Cost | $5,000+ | $0.05 per call | ~$0.001 per category (10 categories) |
 | Time | 2 weeks | Instant | Instant |
-| Granularity | Fixed scope | Per-call | Per-second |
+| Granularity | Fixed scope | Per-call | Per-category |
 | Trust | Reputation | None | World ID verified |
 | Discovery | Manual | Hardcoded URL | ENS name |
 | Refund | Negotiation | None | Automatic on-chain |
@@ -28,30 +30,27 @@ The protocol extends x402 (Circle's HTTP-native payment protocol) from per-reque
 
 ## 2. Architecture
 
-### Three-Layer Payment Stack
+### Two-Layer Payment Stack
 
 ```
-Layer 3: KronoScan Streaming    (our code — per-second tick loop)
-Layer 2: x402 Protocol          (handshake — price discovery + initial auth)
-Layer 1: Circle Gateway         (infrastructure — deposit, settlement, withdrawal)
+Layer 2: StreamVault           (our code — on-chain escrow, tiered pricing, refunds)
+Layer 1: x402 + Nanopayments   (Circle — per-request micropayments via GatewayClient)
 ```
 
-**Layer 1 — Circle Gateway:** Buyer deposits USDC into Gateway Wallet contract on Arc testnet. One-time setup. Gateway Wallet address: `0x0077777d7EBA4688BDeF3E311b846F25870A19B9`.
+**Layer 1 — x402 + Circle Nanopayments:** Each audit category endpoint is x402-protected. Buyer agent calls `GatewayClient.pay(url)` for each request. Circle handles EIP-3009 signing, batching, and settlement. Real micropayments.
 
-**Layer 2 — x402 Handshake:** Buyer hits seller endpoint, gets `402 Payment Required` with pricing. Signs initial EIP-3009 authorization. Connection opens.
-
-**Layer 3 — KronoScan Streaming:** Every second, buyer signs a new EIP-3009 authorization and sends to Coordinator via WebSocket. Coordinator validates, checks solvency on-chain, collects signatures for batch settlement. Seller streams findings via SSE as long as payment flows.
+**Layer 2 — StreamVault:** On-chain escrow. Buyer opens a session (deposits USDC), makes multiple x402 requests within that session, coordinator reports consumption on-chain. When done, unused deposit is refunded automatically.
 
 ### Five Components
 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │   BUYER AGENT    │────▶│   COORDINATOR    │────▶│   SELLER API     │
-│                  │ WS  │                  │     │  (Mock Scanner)  │
-│ - World ID proof │     │ - Auth validator │     │                  │
-│ - ENS resolution │     │ - Solvency watch │     │ - x402 + AgentKit│
-│ - EIP-3009 sigs  │     │ - Stream lifecycle│    │ - SSE findings   │
-│ - SSE consumer   │     │ - Settlement batch│    │                  │
+│                  │ WS  │                  │     │  (Audit Scanner) │
+│ - World ID proof │     │ - x402 mediation │     │                  │
+│ - ENS resolution │     │ - Consumption    │     │ - 10 x402 routes │
+│ - GatewayClient  │     │   tracking       │     │ - AgentKit hooks │
+│ - SSE consumer   │     │ - Session mgmt   │     │ - SSE findings   │
 └──────────────────┘     └────────┬─────────┘     └──────────────────┘
                                   │
                     ┌─────────────┼─────────────┐
@@ -60,10 +59,11 @@ Layer 1: Circle Gateway         (infrastructure — deposit, settlement, withdra
           │  StreamVault.sol │        │    FRONTEND      │
           │  (Arc testnet)   │        │   (Next.js)      │
           │                  │        │                  │
-          │ - Tiered pricing │        │ - Cost counter   │
-          │ - Top-up         │        │ - Findings panel │
-          │ - Grace period   │        │ - Time remaining │
-          │ - Auto-terminate │        │ - Refund summary │
+          │ - Deposit escrow │        │ - Cost counter   │
+          │ - Tiered pricing │        │ - Findings panel │
+          │ - Top-up         │        │ - Budget left    │
+          │ - Session timeout│        │ - Refund summary │
+          │ - Auto-refund    │        │                  │
           └──────────────────┘        └──────────────────┘
 ```
 
@@ -71,11 +71,11 @@ Layer 1: Circle Gateway         (infrastructure — deposit, settlement, withdra
 
 | Path | Protocol | Why |
 |------|----------|-----|
-| Buyer → Coordinator | WebSocket | Per-second auth sigs need low latency |
-| Coordinator → Seller | HTTP/WS | Seller checks `isStreamActive` |
+| Buyer → Seller | HTTP + x402 | Per-request payment via `GatewayClient.pay()` |
+| Buyer → Coordinator | WebSocket | Session management, real-time updates |
+| Coordinator → StreamVault | viem RPC | `reportConsumption()`, `closeSession()` |
 | Coordinator → Frontend | WebSocket | Real-time cost/status updates |
-| Coordinator → StreamVault | viem RPC | `isSolvent()`, `timeRemaining()` reads, `closeStream()` writes |
-| Seller → Buyer (via Coordinator) | SSE | Streaming vulnerability findings |
+| Seller → Buyer | SSE | Streaming vulnerability findings per category |
 
 ---
 
@@ -83,48 +83,53 @@ Layer 1: Circle Gateway         (infrastructure — deposit, settlement, withdra
 
 ### Responsibilities
 
-1. **Register stream** — buyer, seller, rate, deposit, World ID status
+1. **Open session** — lock buyer's USDC deposit, record seller, pricing, World ID status
 2. **Tiered pricing** — verified buyers get 20% discount (`VERIFIED_DISCOUNT_BPS = 2000`)
-3. **Solvency check** — `isSolvent(streamId)` based on deposit vs elapsed * effectiveRate
-4. **Top-up** — `topUp(streamId, amount)` adds USDC without restarting stream
-5. **Auto-termination** — `terminateInsolvency(streamId)` permissionless after 30s grace period
-6. **Close + refund** — `closeStream(streamId, actualConsumed)` distributes funds
+3. **Report consumption** — coordinator reports each x402 payment amount on-chain
+4. **Solvency check** — `isSolvent(sessionId)` based on `consumedAmount < depositedAmount`
+5. **Requests remaining** — `requestsRemaining(sessionId)` = `(deposit - consumed) / effectivePrice`
+6. **Top-up** — `topUp(sessionId, amount)` adds USDC without restarting session
+7. **Session timeout** — `terminateExpired(sessionId)` permissionless after max session duration (safety net)
+8. **Close + refund** — `closeSession(sessionId)` distributes funds: consumed → seller, remainder → buyer
 
 ### Key Data
 
 ```solidity
-struct Stream {
+struct Session {
     address buyer;
     address seller;
-    uint256 baseRatePerSecond;   // seller's quoted rate (USDC 6 decimals)
-    uint256 effectiveRate;       // after verification discount
+    uint256 pricePerRequest;     // seller's quoted price (USDC 6 decimals)
+    uint256 effectivePrice;      // after verification discount
     uint256 depositedAmount;     // total locked (including top-ups)
+    uint256 consumedAmount;      // reported by coordinator
     uint256 startTime;
     uint256 closedTime;
-    StreamStatus status;         // ACTIVE, CLOSED, TERMINATED
+    SessionStatus status;        // ACTIVE, CLOSED, TERMINATED
     bool buyerVerified;          // World ID verified
 }
 ```
 
 ### Events
 
-- `StreamOpened(streamId, buyer, seller, baseRate, effectiveRate, deposit, verified)`
-- `StreamClosed(streamId, consumed, refunded)`
-- `StreamTerminated(streamId, consumed, refunded)`
-- `StreamToppedUp(streamId, amount, newTotal)`
+- `SessionOpened(sessionId, buyer, seller, pricePerRequest, effectivePrice, deposit, verified)`
+- `ConsumptionReported(sessionId, amount, newTotal)`
+- `SessionClosed(sessionId, consumed, refunded)`
+- `SessionTerminated(sessionId, consumed, refunded)`
+- `SessionToppedUp(sessionId, amount, newTotal)`
 
 ### Constants
 
-- `GRACE_PERIOD = 30` — seconds before permissionless termination
+- `MAX_SESSION_DURATION = 3600` — 1 hour max session (safety timeout)
 - `VERIFIED_DISCOUNT_BPS = 2000` — 20% discount for World ID verified buyers
 - `BPS_BASE = 10000`
 
 ### Advanced Stablecoin Logic (Arc "Best Smart Contracts" track)
 
-- **Identity-conditioned pricing:** `_applyDiscount()` computes rate on-chain based on World ID boolean. USDC flow changes based on external identity proof.
-- **Grace period + auto-termination:** `terminateInsolvency()` is permissionless but respects grace period. Closes at exact insolvency timestamp, not call time — seller gets exactly what was earned.
-- **Top-up without restart:** `topUp()` extends stream duration mid-flow. Prevents premature termination for long-running scans.
-- **`timeRemaining()` view:** Frontend shows countdown, enabling proactive top-up.
+- **Identity-conditioned pricing:** `_applyDiscount()` computes price on-chain based on World ID boolean. USDC flow changes based on external identity proof.
+- **On-chain consumption tracking:** Coordinator reports each x402 payment via `reportConsumption()`. Contract maintains running total. Enables on-chain solvency verification.
+- **Session timeout + auto-termination:** `terminateExpired()` is permissionless — anyone can close an expired session. Handles coordinator failure gracefully. Consumed goes to seller, remainder refunded to buyer.
+- **Top-up without restart:** `topUp()` extends session budget mid-flow. Prevents premature termination for large audits.
+- **`requestsRemaining()` view:** Frontend shows "N requests left", enabling proactive top-up.
 
 ### Dependencies
 
@@ -133,68 +138,82 @@ struct Stream {
 
 ### Size
 
-~150 lines. Focused but with genuinely sophisticated programmable stablecoin logic.
+~180 lines. Focused but with genuinely sophisticated programmable stablecoin logic.
 
 ---
 
-## 4. Coordinator — Traffic Controller
+## 4. Coordinator — Session Manager
 
 ### State
 
 ```typescript
-interface ActiveStream {
-  streamId: string;
+interface ActiveSession {
+  sessionId: Hex;
   buyer: Address;
   seller: Address;
-  baseRate: bigint;
-  effectiveRate: bigint;
+  pricePerRequest: bigint;
+  effectivePrice: bigint;
+  deposit: bigint;
   verified: boolean;
   startTime: number;
-  authorizations: EIP3009Auth[];
-  totalConsumed: bigint;
   status: 'OPENING' | 'ACTIVE' | 'CLOSING' | 'CLOSED' | 'TERMINATED';
+  requestCount: number;
+  totalConsumed: bigint;
+  completedCategories: string[];
 }
 ```
 
-In-memory `Map<string, ActiveStream>`. No database. Single process.
+In-memory `Map<string, ActiveSession>`. No database. Single process.
 
 ### Responsibilities
 
-1. **x402 handshake mediation** — validates initial payment sig, opens stream on-chain, signals seller
-2. **Per-second tick receiver** — validates each EIP-3009 sig (correct from/to/value/validBefore), updates consumed total
-3. **Solvency watchdog** — calls `StreamVault.isSolvent()` every 5-10s, pushes `timeRemaining()` to frontend
-4. **Settlement batching** — collects valid signatures, forwards to Circle Nanopayments API (or logs as "ready for settlement" if API unavailable)
-5. **Stream lifecycle** — manages `IDLE → OPENING → ACTIVE → CLOSING → CLOSED/TERMINATED`
+1. **Session lifecycle** — manages `IDLE → OPENING → ACTIVE → CLOSING → CLOSED/TERMINATED`
+2. **x402 payment mediation** — buyer agent makes x402 requests through coordinator to seller endpoints
+3. **Consumption tracking** — after each successful x402 payment, calls `StreamVault.reportConsumption()` on-chain
+4. **Solvency monitoring** — reads `isSolvent()` + `requestsRemaining()` periodically, pushes to frontend
+5. **Session close** — calls `StreamVault.closeSession()` to distribute funds + trigger refund
+6. **Real-time updates** — WebSocket pushes to frontend: cost updates, findings, status changes
 
 ### What's NOT Here
 
 - No database — in-memory only
 - No auth/sessions — single-user demo
 - No Redis/queue — single process handles everything
+- No custom EIP-3009 signing — Circle's GatewayClient handles all payment signatures
 
 ---
 
-## 5. Seller API — Mock Audit Scanner
+## 5. Seller API — Audit Scanner
 
-### Endpoints
+### 10 Audit Category Endpoints
 
-**`POST /api/audit` (unauthenticated) → 402:**
-```json
-{
-  "paymentRequired": true,
-  "scheme": "exact",
-  "baseRatePerSecond": 100,
-  "network": "arc-testnet",
-  "sellerAddress": "0x...",
-  "sellerENS": "audit.kronoscan.eth",
-  "acceptsUnverified": true,
-  "coordinatorUrl": "ws://localhost:3001"
-}
+Each endpoint is x402-protected. Returns `402 Payment Required` without payment, streams findings with valid payment.
+
+| # | Endpoint | Category | What it checks |
+|---|----------|----------|----------------|
+| 1 | `POST /api/audit/reentrancy` | Reentrancy | Cross-function, read-only, cross-contract reentrancy |
+| 2 | `POST /api/audit/access-control` | Access Control | Missing modifiers, privilege escalation, centralization |
+| 3 | `POST /api/audit/arithmetic` | Arithmetic/Precision | Overflow, rounding, division-before-multiply |
+| 4 | `POST /api/audit/external-calls` | External Call Safety | Unchecked returns, untrusted targets, delegatecall |
+| 5 | `POST /api/audit/token-standards` | Token Standards | ERC20/721/1155 compliance, approval patterns |
+| 6 | `POST /api/audit/business-logic` | Business Logic | State machine flaws, economic exploits, MEV |
+| 7 | `POST /api/audit/gas-optimization` | Gas/Optimization | Storage packing, loop efficiency, calldata usage |
+| 8 | `POST /api/audit/code-quality` | Code Quality | Missing events, magic numbers, naming |
+| 9 | `POST /api/audit/compiler` | Compiler/Version | Pragma issues, known compiler bugs |
+| 10 | `POST /api/audit/defi` | DeFi-Specific | Oracle manipulation, flash loans, slippage |
+
+### x402 Flow Per Endpoint
+
+```
+Buyer → POST /api/audit/reentrancy (no payment header)
+Seller → 402 { pricePerRequest: 100, scheme: "exact", ... }
+Buyer → GatewayClient.pay(url) → POST with PAYMENT-SIGNATURE header
+Seller → 200 SSE stream of findings for that category
 ```
 
-**`POST /api/audit` (authenticated, valid stream) → SSE:**
+### Request Body
 
-Request body accepts two input modes:
+Each endpoint accepts two input modes:
 ```json
 { "contractSource": "pragma solidity ^0.8.30; ..." }
 ```
@@ -203,26 +222,18 @@ OR:
 { "contractAddress": "0x7f3a...", "chain": "arc-testnet" }
 ```
 
-For address mode, the seller API calls the block explorer API to fetch verified source code:
-```
-GET https://<explorer-api>/api?module=contract&action=getsourcecode&address=0x...&apikey=KEY
-```
-If the contract is not verified, returns `400 { error: "Contract not verified" }`. No bytecode decompilation.
+For address mode, the seller API calls the block explorer API to fetch verified source code. If the contract is not verified, returns `400 { error: "Contract not verified" }`.
 
-Streams pre-written vulnerability findings one by one:
-```json
-{ "severity": "CRITICAL", "title": "Reentrancy in withdraw()", "line": 47, "desc": "State updated after external call" }
-{ "severity": "HIGH", "title": "Unchecked return value", "line": 83, "desc": "transfer() return not checked" }
-```
+### Findings Source
 
-Each finding streamed every ~2 seconds. Seller checks `isStreamActive` before each finding.
+Two options (decided during implementation):
+- **DeepSeek API** — free LLM for actual analysis. Prompt per category. Real findings.
+- **Pre-written fallback** — hand-crafted findings per category matched to sample contract. Used if DeepSeek is unreliable.
 
-The mock scanner ignores the actual source content — findings are pre-written. The resolved/pasted source is displayed in the dashboard so judges can see what's being "scanned." The on-chain address resolution is real — it demonstrates the "audit any deployed contract" capability.
+### Mock Data Requirements (if using pre-written)
 
-### Mock Data Requirements
-
-- 8-12 pre-written findings matched to a sample vulnerable contract
-- Findings must reference real vulnerability patterns (reentrancy, unchecked calls, access control, missing events)
+- 8-12 pre-written findings across categories matched to a sample vulnerable contract
+- Findings must reference real vulnerability patterns
 - The sample contract is displayed in the dashboard — findings must be accurate to it
 - Severity distribution: ~3 Critical, ~2 High, ~4 Medium, ~3 Low
 
@@ -230,7 +241,7 @@ The mock scanner ignores the actual source content — findings are pre-written.
 
 Seller uses `createAgentkitHooks()` from `@worldcoin/agentkit` to verify buyer agent is registered in AgentBook before serving findings. This is the "meaningful distinction" required for the $8K World prize.
 
-Trust tiers: verified agents get full detailed findings, unverified agents could get summary only.
+Trust tiers: verified agents get full detailed findings, unverified agents get summary only.
 
 ---
 
@@ -241,11 +252,13 @@ Trust tiers: verified agents get full detailed findings, unverified agents could
 1. World ID verification (IDKitWidget proof pre-stored or Cloud API)
 2. ENS resolution: `audit.kronoscan.eth` → seller address (viem on Sepolia)
 3. Service discovery: POST to seller → get 402 with pricing
-4. Gateway deposit: USDC into Gateway Wallet on Arc (one-time, may already be done)
-5. Open stream: `StreamVault.openStream()` with deposit, rate, verification boolean
-6. Tick loop: every 1s, sign EIP-3009 auth with viem, send to Coordinator via WebSocket
-7. Consume SSE: read vulnerability findings from seller, forward to frontend — request body includes either `contractSource` (pasted source) or `contractAddress` + `chain` (on-chain address for verified source fetch)
-8. Close: when SSE ends, stop tick loop, Coordinator calls `StreamVault.closeStream()`
+4. Open session: `StreamVault.openSession()` with deposit + verification boolean
+5. Loop through 10 audit categories:
+   - `GatewayClient.pay(categoryUrl)` — real x402 micropayment
+   - Coordinator records consumption on-chain via `reportConsumption()`
+   - Receive findings via SSE, forward to frontend
+6. Close session: Coordinator calls `StreamVault.closeSession()`
+7. Dashboard shows refund amount + ArcScan links
 
 ### Orchestration
 
@@ -266,29 +279,30 @@ Single-page Next.js app. The demo centerpiece.
 - World ID status: "Verified" (green) or "Unverified" (yellow)
 - Target: `audit.kronoscan.eth` (ENS name with resolved address tooltip)
 
-**Contract Input Panel:** Toggle between "Paste Source" (textarea) and "On-Chain Address" (address input + chain selector). For address mode, the resolved source is displayed after fetch. Shows "Fetching verified source..." during resolution.
+**Contract Input Panel:** Toggle between "Paste Source" (textarea) and "On-Chain Address" (address input + chain selector). For address mode, the resolved source is displayed after fetch.
 
-**Stream Control:** "Run Audit" button, status pill (IDLE → OPENING → ACTIVE → CLOSING → CLOSED)
+**Session Control:** "Run Audit" button, status pill (IDLE → OPENING → ACTIVE → CLOSING → CLOSED)
 
 **Live Metrics (visible during ACTIVE):**
-- Cost counter: `$0.0024` ticking up every second (large font)
-- Rate: "Base: $0.0001/s → Effective: $0.00008/s (Verified -20%)"
-- Time remaining countdown bar
-- Deposit progress bar
-- Auth count: "30 authorizations sent"
+- Cost counter: `$0.0010` jumping up per completed category (large font)
+- Rate: "Base: $0.0001/req → Effective: $0.00008/req (Verified -20%)"
+- Budget remaining bar (deposit - consumed)
+- Requests remaining: "7 of 10 categories left"
+- Category progress: checklist of 10 categories with checkmarks
 
 **Findings Panel:**
-- Vulnerability findings appear one-by-one with severity badges
+- Vulnerability findings appear per-category with severity badges
 - CRITICAL (red), HIGH (orange), MEDIUM (yellow), LOW (blue)
 - Each finding: severity, title, line number, description
+- Grouped by audit category
 
 **Result Card (after CLOSED):**
 - Findings summary: "3 Critical, 2 High, 4 Medium, 3 Low"
-- Duration: 30 seconds
-- Total cost: $0.0024
-- Refund: $0.9976
-- ArcScan links (StreamOpened event + refund tx)
-- Comparison: "Traditional audit: $5,000+ / 2 weeks | KronoScan: $0.0024 / 30 seconds"
+- Categories completed: 10/10
+- Total cost: $0.0010
+- Refund: $0.9990
+- ArcScan links (SessionOpened event + refund tx)
+- Comparison: "Traditional audit: $5,000+ / 2 weeks | KronoScan: $0.001 / 30 seconds"
 
 ### Tech
 
@@ -331,8 +345,8 @@ Single-page Next.js app. The demo centerpiece.
 2. User scans with World App on phone
 3. Frontend receives proof → sends to backend
 4. Backend verifies via `POST https://developer.worldcoin.org/api/v2/verify/{app_id}`
-5. Boolean `worldIdVerified` passed to `StreamVault.openStream()`
-6. On-chain: verified buyers get 20% rate discount
+5. Boolean `worldIdVerified` passed to `StreamVault.openSession()`
+6. On-chain: verified buyers get 20% price discount
 
 **Seller side — AgentKit hooks:**
 1. Seller endpoint uses `createAgentkitHooks()` from `@worldcoin/agentkit`
@@ -364,40 +378,55 @@ Single-page Next.js app. The demo centerpiece.
 | Component | Real | Mocked |
 |-----------|------|--------|
 | StreamVault.sol | Deployed on Arc testnet, real USDC interactions | — |
-| EIP-3009 signatures | Cryptographically valid, signed with viem | — |
+| x402 payments | Real `GatewayClient.pay()` per audit category | — |
+| Circle Nanopayments | Real EIP-3009 via GatewayClient, real batching | Settlement timing may vary |
 | Gateway Wallet deposit | Real on-chain deposit | — |
-| x402 handshake | Real 402 response + PAYMENT-SIGNATURE header | — |
 | World ID verification | Real IDKitWidget + Cloud API verification | — |
 | ENS resolution | Real resolution on Sepolia testnet | — |
 | On-chain source resolution | Real block explorer API call, real verified source fetch | — |
-| Circle Nanopayments batch settlement | — | Signatures collected but batch API forwarding may be simulated |
-| AI security scanning | — | Pre-written findings streamed via SSE |
+| AI security scanning | DeepSeek API for real analysis (if reliable) | Pre-written findings as fallback |
 
 ---
 
 ## 11. Demo Script (90 seconds)
 
-**[0:00]** Dashboard shows sample vulnerable Solidity contract. Agent wallet: $1.00 USDC.
+**[0:00]** Dashboard shows contract input with two modes. Agent wallet: $1.00 USDC.
 
-*"This is an AI auditing agent with $1 of USDC on Arc. It's backed by a World ID. It needs to scan this contract for vulnerabilities."*
+*"This is an AI auditing agent with $1 of USDC on Arc. It's backed by a World ID — a verified human is accountable. It needs to scan this contract for vulnerabilities across 10 audit categories."*
 
 **[0:10]** Click "Run Audit".
 ```
 Resolving audit.kronoscan.eth → 0x7f3a...
-402 Payment Required — Base rate: $0.0001/sec
-World ID Verified — discount applied: $0.00008/sec (20% off)
-Stream opened [ArcScan link]
+402 Payment Required — Price: $0.0001/request
+World ID Verified — discount applied: $0.00008/request (20% off)
+Session opened — 10 categories, budget: $1.00 [ArcScan link]
 ```
 
-**[0:20]** Findings stream in live with severity badges.
-
-**[0:45]** Scan complete.
+**[0:15]** Categories run sequentially. Each one:
 ```
-12 findings | 30 seconds | $0.0024 | Refund: $0.9976
-Traditional audit: $5,000+ / 2 weeks
+🔍 Reentrancy Analysis... paying $0.00008 via x402 ✅
+  🔴 CRITICAL: Reentrancy in withdraw() — state updated after external call (line 47)
+🔍 Access Control... paying $0.00008 via x402 ✅
+  🟠 HIGH: Missing onlyOwner modifier on setPrice() (line 23)
+🔍 Arithmetic... paying $0.00008 via x402 ✅
+  🟡 MEDIUM: Division before multiplication in calculateFee() (line 56)
 ```
 
-**[1:05]** Show ArcScan links. Close.
+*"Each category is a separate x402 micropayment through Circle Nanopayments. Real payments, real batching, sub-cent costs. 10 requests batched into a single on-chain settlement."*
+
+**[0:45]** All 10 categories complete. Session closes.
+```
+✅ 12 findings (3 Critical, 2 High, 4 Medium, 3 Low)
+   10 categories | 30 seconds | Cost: $0.0008 | Refund: $0.9992
+   Verified savings: 20% discount applied
+   Settlement: 10 nanopayments batched [ArcScan link]
+```
+
+*"30 seconds. 12 vulnerabilities found across 10 categories. Total cost: $0.0008. Traditional audit: $5,000 and two weeks. The unused deposit — $0.9992 — refunded automatically on-chain."*
+
+**[1:05]** Click through ArcScan links. Show SessionOpened event and refund tx.
+
+*"10 real micropayments batched by Circle Nanopayments. Identity-conditioned pricing via World ID. Service discovered by ENS name. This is what agentic commerce looks like."*
 
 ---
 
@@ -413,21 +442,33 @@ kronoscan/
 ├── coordinator/
 │   └── src/
 │       ├── index.ts                # Express + WS server
-│       ├── streamManager.ts        # Stream lifecycle
-│       ├── authValidator.ts        # EIP-3009 validation
-│       ├── nanopayments.ts         # Circle Nanopayments client
+│       ├── sessionManager.ts       # Session lifecycle
+│       ├── vaultClient.ts          # StreamVault on-chain interactions
+│       ├── abi.ts                  # StreamVault ABI
+│       ├── types.ts                # Shared types
+│       ├── errors.ts               # Custom error classes
 │       ├── ensResolver.ts          # ENS resolution
 │       └── worldId.ts              # World ID Cloud API verification
 ├── seller-api/
 │   └── src/
-│       ├── index.ts                # Express + SSE audit endpoint
-│       ├── x402Handler.ts          # 402 payment negotiation
-│       ├── sourceResolver.ts       # Fetch verified source from block explorer (address → source)
-│       └── findings.ts             # Pre-written vulnerability findings
+│       ├── index.ts                # Express + x402 middleware
+│       ├── categories/             # 10 audit category handlers
+│       │   ├── reentrancy.ts
+│       │   ├── accessControl.ts
+│       │   ├── arithmetic.ts
+│       │   ├── externalCalls.ts
+│       │   ├── tokenStandards.ts
+│       │   ├── businessLogic.ts
+│       │   ├── gasOptimization.ts
+│       │   ├── codeQuality.ts
+│       │   ├── compiler.ts
+│       │   └── defi.ts
+│       ├── sourceResolver.ts       # Fetch verified source from block explorer
+│       └── findings.ts             # Pre-written findings (fallback)
 ├── agent/
 │   └── src/
 │       ├── index.ts                # Demo audit agent
-│       ├── streamClient.ts         # KronoScan client SDK
+│       ├── sessionClient.ts        # KronoScan client SDK
 │       ├── wallet.ts               # Agent wallet management
 │       └── sampleContract.ts       # Vulnerable contract for demo
 ├── frontend/
@@ -435,7 +476,7 @@ kronoscan/
 │   │   ├── page.tsx                # Main dashboard
 │   │   └── components/
 │   │       ├── CostMeter.tsx
-│   │       ├── StreamStatus.tsx
+│   │       ├── CategoryProgress.tsx
 │   │       ├── FindingsPanel.tsx
 │   │       ├── AgentIdentity.tsx
 │   │       └── RefundSummary.tsx
@@ -448,25 +489,25 @@ kronoscan/
 
 ## 13. Implementation Phases
 
-### Phase 1: Core streaming (Days 1-3)
-1. StreamVault.sol + Foundry tests (tiered pricing, top-up, grace period, auto-termination)
-2. Deploy to Arc testnet
-3. Coordinator — stream lifecycle + per-second auth validation
-4. Seller API — x402 endpoint + SSE vulnerability findings
-5. Buyer Agent — audit agent that opens stream, ticks, closes
+### Phase 1: Smart Contract + Core (Days 1-3)
+1. StreamVault.sol refactor — rename fields, add `consumedAmount`, `reportConsumption()`, `terminateExpired()`
+2. Update Foundry tests for new contract interface
+3. Deploy to Arc testnet
+4. Coordinator refactor — session manager (was stream manager), consumption tracking
+5. Seller API — 10 x402-protected audit category endpoints
 
-**Milestone:** End-to-end audit flow working in terminal output.
+**Milestone:** End-to-end audit flow: open session → 10 x402 payments → findings → close → refund.
 
 ### Phase 2: Dashboard (Days 4-5)
-6. Next.js dashboard — cost counter, findings panel, stream status, refund display
-7. Sample vulnerable contract + pre-written findings
+6. Next.js dashboard — cost counter, category progress, findings panel, refund display
+7. Sample vulnerable contract + findings (DeepSeek or pre-written)
 
 **Milestone:** Visual audit demo running in browser.
 
 ### Phase 3: World ID (Days 6-7)
 8. IDKitWidget + Cloud API verification in frontend/backend
 9. AgentKit hooks on seller side
-10. Trust tier UI (verified badge + rate discount visible)
+10. Trust tier UI (verified badge + price discount visible)
 
 **Milestone:** World ID badge + discount visible in demo flow.
 
@@ -489,21 +530,22 @@ kronoscan/
 
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
-| Circle Nanopayments batch API inaccessible | Medium | Mock settlement; real EIP-3009 signatures still collected |
+| Circle GatewayClient not available on Arc testnet | Medium | Mock x402 layer; real contract interactions still work |
 | World AgentKit not on Arc testnet | Confirmed | Offchain verification via Cloud API; boolean passed to Arc |
-| Mock findings look unconvincing | Low | Pre-write findings against a real vulnerable contract; test with Solidity devs |
-| Too many components for solo dev | Medium | Phase 1 core is the priority; World ID + ENS are additive |
+| DeepSeek API unreliable during demo | Medium | Pre-written findings as fallback, toggle in config |
+| 10 endpoints feels repetitive in demo | Low | Run categories in parallel or show progress bar; each takes 2-3s |
 | Gateway Wallet not deployed on Arc testnet | Low | Verify early; fallback to direct USDC approve+deposit |
 
 ---
 
 ## 15. Success Criteria
 
-- [ ] End-to-end demo runs without manual intervention (click "Run Audit" → findings stream → refund shown)
-- [ ] StreamVault deployed on Arc testnet with all 6 functions working
-- [ ] Tiered pricing visible: verified vs unverified rate difference shown in dashboard
+- [ ] End-to-end demo runs without manual intervention (click "Run Audit" → 10 categories → findings → refund)
+- [ ] StreamVault deployed on Arc testnet with session management + consumption tracking
+- [ ] x402 payments working: real `GatewayClient.pay()` per category
+- [ ] Tiered pricing visible: verified vs unverified price difference shown in dashboard
 - [ ] World ID verification via IDKitWidget working
 - [ ] ENS resolution working: `audit.kronoscan.eth` displayed, not raw address
-- [ ] Cost comparison compelling: "$5K+ / 2 weeks vs $0.0024 / 30 seconds"
+- [ ] Cost comparison compelling: "$5K+ / 2 weeks vs $0.001 / 30 seconds"
 - [ ] ArcScan links work and show real on-chain events
 - [ ] 90-second demo rehearsed and smooth
