@@ -15,7 +15,10 @@
       "Bash(npm i:*)",
       "Bash(npx vitest:*)",
       "Bash(timeout 5 npx tsx src/index.ts)",
-      "Bash(curl -s http://localhost:3001/health)"
+      "Bash(curl -s http://localhost:3001/health)",
+      "Bash(npx tsx -e ':*)",
+      "Bash(npx tsx:*)",
+      "Bash(pkill -f \"tsx src/index.ts\")"
     ]
   }
 }
