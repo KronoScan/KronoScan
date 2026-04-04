@@ -9,7 +9,9 @@
       "Bash(forge build:*)",
       "Bash(forge test:*)",
       "Bash(python3 -c \"import sys,json; abi=json.load\\(sys.stdin\\)['abi']; [print\\(json.dumps\\(f,indent=2\\)\\) for f in abi if f.get\\('type'\\)=='function']\")",
-      "Bash(python3 -c \"import sys,json; abi=json.load\\(sys.stdin\\)['abi']; [print\\(json.dumps\\(f,indent=2\\)\\) for f in abi if f.get\\('type'\\)=='event']\")"
+      "Bash(python3 -c \"import sys,json; abi=json.load\\(sys.stdin\\)['abi']; [print\\(json.dumps\\(f,indent=2\\)\\) for f in abi if f.get\\('type'\\)=='event']\")",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
