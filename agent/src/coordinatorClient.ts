@@ -50,7 +50,13 @@ export class CoordinatorClient {
       });
 
       this.ws.on("message", (raw) => {
-        const msg = JSON.parse(raw.toString()) as CoordinatorMsg;
+        let msg: CoordinatorMsg;
+        try {
+          msg = JSON.parse(raw.toString()) as CoordinatorMsg;
+        } catch {
+          console.warn("[coordinator] Received non-JSON message, ignoring");
+          return;
+        }
         console.log(`[coordinator] ← ${msg.type}`, msg.type === "error" ? msg.message : "");
 
         const waiterIdx = this.waiters.findIndex((w) => !w.filter || w.filter === msg.type);
@@ -69,6 +75,7 @@ export class CoordinatorClient {
 
       this.ws.on("close", () => {
         console.log("[coordinator] Disconnected");
+        this.rejectAllWaiters("WebSocket disconnected");
       });
     });
   }
@@ -135,7 +142,15 @@ export class CoordinatorClient {
     return msg as SessionClosedMsg;
   }
 
+  private rejectAllWaiters(reason: string): void {
+    const pending = this.waiters.splice(0);
+    for (const waiter of pending) {
+      waiter.resolve({ type: "error", message: reason } as CoordinatorMsg);
+    }
+  }
+
   disconnect(): void {
+    this.rejectAllWaiters("Client disconnected");
     if (this.ws) {
       this.ws.close();
       this.ws = null;
