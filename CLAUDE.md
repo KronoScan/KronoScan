@@ -28,6 +28,7 @@ Required env vars (create `.env` in project root):
 - `COORDINATOR_ADDRESS` — coordinator wallet address (for StreamVault deployment)
 - `COORDINATOR_URL` — coordinator backend URL (default: `http://localhost:3001`)
 - `SELLER_API_URL` — seller API URL (default: `http://localhost:3002`)
+- `ETHERSCAN_API_KEY` — block explorer API key (for fetching verified contract source from on-chain addresses)
 
 ## Code Style
 
@@ -41,6 +42,7 @@ Required env vars (create `.env` in project root):
 - Circle Nanopayments requires no API key — just a wallet + `@circle-fin/x402-batching` SDK
 - World AgentKit supports Base Sepolia testnet, NOT Arc testnet — verification happens off-Arc, boolean passed to StreamVault
 - The seller API is intentionally a mock — pre-written vulnerability findings streamed via SSE, not real AI scanning. Findings must look credible against the sample contract shown in the demo.
+- **On-chain audit input:** The seller API accepts EITHER raw Solidity source OR a contract address. For addresses, it fetches verified source from the block explorer API (Etherscan-compatible). If the contract is not verified, it returns an error — no bytecode decompilation.
 - Nanopayments may need partial mocking if SDK doesn't work on Arc testnet yet — EIP-3009 signing must be real, API forwarding can be simulated
 
 ---
@@ -132,7 +134,7 @@ We are targeting **Arc + World + ENS** as our 3 sponsors (max allowed).
 │                    BUYER AGENT                                  │
 │                    (TypeScript demo script)                     │
 │                                                                 │
-│  1. Agent has a task: "Audit this smart contract"              │
+│  1. Agent has a task: "Audit this smart contract" (source or address) │
 │  2. Agent resolves seller via ENS: audit.streampay.eth         │
 │  3. Agent hits seller's API → receives 402 Payment Required    │
 │  4. Agent opens a stream on StreamVault (deposits USDC)        │
@@ -436,10 +438,18 @@ app.post('/api/audit', async (req, res) => {
         });
     }
 
-    // 2. Valid stream? Start SSE response
+    // 2. Resolve contract source (address OR raw source)
+    let contractSource = req.body.contractSource;
+    if (req.body.contractAddress && !contractSource) {
+        // Fetch verified source from block explorer API
+        contractSource = await fetchVerifiedSource(req.body.contractAddress, req.body.chain);
+        if (!contractSource) return res.status(400).json({ error: 'Contract not verified' });
+    }
+
+    // 3. Valid stream? Start SSE response
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     
-    // 3. Stream pre-written vulnerability findings one by one
+    // 4. Stream pre-written vulnerability findings one by one
     const findings = [
         { severity: 'CRITICAL', title: 'Reentrancy in withdraw()', line: 47, desc: 'State updated after external call' },
         { severity: 'HIGH', title: 'Unchecked return value', line: 83, desc: 'transfer() return not checked' },
@@ -461,6 +471,10 @@ app.post('/api/audit', async (req, res) => {
 ```
 
 **For the demo:** The seller API is a mock scanner. It does NOT do real static analysis. It has pre-written vulnerability findings matched to a sample vulnerable contract that it streams via SSE. The findings must look credible — reference real vulnerability patterns (reentrancy, unchecked calls, access control) against the sample contract shown in the dashboard. The point of the demo is the payment flow, not the AI scanning quality.
+
+**Two input modes:**
+- **Source mode:** User pastes Solidity source code directly. Used for the pre-written demo flow.
+- **Address mode:** User pastes a deployed contract address + chain. Seller API calls the block explorer API (`GET /api?module=contract&action=getsourcecode&address=0x...`) to fetch verified source. If the contract isn't verified, returns an error. This mode demonstrates on-chain contract auditing — the compelling "audit any deployed contract" story.
 
 **Sample contract for the demo:** Use an intentionally vulnerable Solidity contract (or inject a few bugs into a copy of StreamVault.sol). Pre-write 8-12 findings that accurately describe the injected vulnerabilities. Judges who write Solidity will spot nonsensical findings.
 
@@ -502,10 +516,14 @@ async function runAuditAgent() {
     }, 1000);
     
     // 6. Simultaneously consume the SSE stream of vulnerability findings
+    // Two input modes: raw source OR on-chain address
     const response = await fetch('https://seller-api/audit', {
         method: 'POST',
         headers: { 'payment-signature': initialAuth },
-        body: JSON.stringify({ contractSource: sampleVulnerableContract })
+        body: JSON.stringify({
+            contractSource: sampleVulnerableContract,  // OR:
+            // contractAddress: '0x...', chain: 'arc-testnet'  // fetch verified source on-chain
+        })
     });
     for await (const chunk of response.body) {
         displayFindingOnDashboard(chunk);  // severity-tagged findings appearing live
@@ -528,7 +546,8 @@ The demo centerpiece. This is what judges see and remember.
 Top section:
 - Agent identity: wallet address + "World ID Verified" badge
 - Service target: `audit.streampay.eth` (ENS name, resolved)
-- Target contract: sample vulnerable contract displayed (Solidity source)
+- **Contract input:** Toggle between "Paste Source" (textarea) and "On-Chain Address" (address input + chain selector). For address mode, fetched source is displayed after resolution.
+- Target contract: resolved or pasted Solidity source displayed
 
 Middle section (the star):
 - Big live cost counter: `$0.0024` ticking up every second
@@ -560,9 +579,9 @@ End state:
 
 This is the exact flow Martin will present to judges:
 
-**[0:00]** Dashboard shows a sample Solidity contract with intentional vulnerabilities. Agent wallet: $1.00 USDC. Status: IDLE.
+**[0:00]** Dashboard shows contract input with two modes: "Paste Source" and "On-Chain Address". Agent wallet: $1.00 USDC. Status: IDLE. A sample contract address is entered (or source pasted).
 
-*"This is an AI auditing agent with $1 of USDC on Arc. It's backed by a World ID — a verified human is accountable for this agent. It needs to scan this smart contract for security vulnerabilities using a paid audit service."*
+*"This is an AI auditing agent with $1 of USDC on Arc. It's backed by a World ID — a verified human is accountable for this agent. It can audit any smart contract — paste source code, or enter a deployed contract address and we'll fetch the verified source on-chain."*
 
 **[0:10]** Click "Run Audit". Dashboard shows:
 ```
@@ -724,6 +743,7 @@ streampay/
 │   ├── src/
 │   │   ├── index.ts          # Express + SSE audit endpoint
 │   │   ├── x402Handler.ts    # 402 payment negotiation
+│   │   ├── sourceResolver.ts # Fetch verified source from block explorer API (on-chain address → source)
 │   │   └── findings.ts       # Pre-written vulnerability findings for demo
 │   └── package.json
 ├── agent/

@@ -193,6 +193,22 @@ In-memory `Map<string, ActiveStream>`. No database. Single process.
 ```
 
 **`POST /api/audit` (authenticated, valid stream) → SSE:**
+
+Request body accepts two input modes:
+```json
+{ "contractSource": "pragma solidity ^0.8.30; ..." }
+```
+OR:
+```json
+{ "contractAddress": "0x7f3a...", "chain": "arc-testnet" }
+```
+
+For address mode, the seller API calls the block explorer API to fetch verified source code:
+```
+GET https://<explorer-api>/api?module=contract&action=getsourcecode&address=0x...&apikey=KEY
+```
+If the contract is not verified, returns `400 { error: "Contract not verified" }`. No bytecode decompilation.
+
 Streams pre-written vulnerability findings one by one:
 ```json
 { "severity": "CRITICAL", "title": "Reentrancy in withdraw()", "line": 47, "desc": "State updated after external call" }
@@ -201,7 +217,7 @@ Streams pre-written vulnerability findings one by one:
 
 Each finding streamed every ~2 seconds. Seller checks `isStreamActive` before each finding.
 
-The buyer sends contract source in the POST body, but the mock scanner ignores it — findings are pre-written. The contract source is only used for display in the dashboard so judges can see what's being "scanned."
+The mock scanner ignores the actual source content — findings are pre-written. The resolved/pasted source is displayed in the dashboard so judges can see what's being "scanned." The on-chain address resolution is real — it demonstrates the "audit any deployed contract" capability.
 
 ### Mock Data Requirements
 
@@ -228,7 +244,7 @@ Trust tiers: verified agents get full detailed findings, unverified agents could
 4. Gateway deposit: USDC into Gateway Wallet on Arc (one-time, may already be done)
 5. Open stream: `StreamVault.openStream()` with deposit, rate, verification boolean
 6. Tick loop: every 1s, sign EIP-3009 auth with viem, send to Coordinator via WebSocket
-7. Consume SSE: read vulnerability findings from seller, forward to frontend
+7. Consume SSE: read vulnerability findings from seller, forward to frontend — request body includes either `contractSource` (pasted source) or `contractAddress` + `chain` (on-chain address for verified source fetch)
 8. Close: when SSE ends, stop tick loop, Coordinator calls `StreamVault.closeStream()`
 
 ### Orchestration
@@ -250,7 +266,7 @@ Single-page Next.js app. The demo centerpiece.
 - World ID status: "Verified" (green) or "Unverified" (yellow)
 - Target: `audit.streampay.eth` (ENS name with resolved address tooltip)
 
-**Contract Panel:** Sample vulnerable Solidity contract source displayed
+**Contract Input Panel:** Toggle between "Paste Source" (textarea) and "On-Chain Address" (address input + chain selector). For address mode, the resolved source is displayed after fetch. Shows "Fetching verified source..." during resolution.
 
 **Stream Control:** "Run Audit" button, status pill (IDLE → OPENING → ACTIVE → CLOSING → CLOSED)
 
@@ -353,6 +369,7 @@ Single-page Next.js app. The demo centerpiece.
 | x402 handshake | Real 402 response + PAYMENT-SIGNATURE header | — |
 | World ID verification | Real IDKitWidget + Cloud API verification | — |
 | ENS resolution | Real resolution on Sepolia testnet | — |
+| On-chain source resolution | Real block explorer API call, real verified source fetch | — |
 | Circle Nanopayments batch settlement | — | Signatures collected but batch API forwarding may be simulated |
 | AI security scanning | — | Pre-written findings streamed via SSE |
 
@@ -405,6 +422,7 @@ streampay/
 │   └── src/
 │       ├── index.ts                # Express + SSE audit endpoint
 │       ├── x402Handler.ts          # 402 payment negotiation
+│       ├── sourceResolver.ts       # Fetch verified source from block explorer (address → source)
 │       └── findings.ts             # Pre-written vulnerability findings
 ├── agent/
 │   └── src/
