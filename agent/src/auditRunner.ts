@@ -1,5 +1,5 @@
 import type { Hex } from "viem";
-import { SELLER_API_URL, AUDIT_CATEGORIES } from "./config.js";
+import { SELLER_API_URL as DEFAULT_SELLER_API_URL, AUDIT_CATEGORIES } from "./config.js";
 import {
   parseSSEStream,
   isCategoryComplete,
@@ -29,6 +29,7 @@ export async function runAudit(
   sessionId: Hex,
   effectivePrice: string,
   contractSource?: string,
+  sellerApiUrl?: string,
 ): Promise<AuditSummary> {
   const results: AuditResult[] = [];
   let totalCost = 0n;
@@ -48,7 +49,8 @@ export async function runAudit(
   for (const category of AUDIT_CATEGORIES) {
     console.log(`\n── [${results.length + 1}/10] ${category} ──`);
 
-    const url = `${SELLER_API_URL}/api/audit/${category}`;
+    const apiBase = sellerApiUrl || DEFAULT_SELLER_API_URL;
+    const url = `${apiBase}/api/audit/${category}`;
     const body: Record<string, string> = {};
     if (contractSource) {
       body.contractSource = contractSource;

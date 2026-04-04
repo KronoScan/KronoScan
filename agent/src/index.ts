@@ -1,11 +1,9 @@
 import {
-  SELLER_ADDRESS,
   DEPOSIT_AMOUNT,
-  PRICE_PER_REQUEST,
   WORLD_ID_VERIFIED,
-  SELLER_API_URL,
   COORDINATOR_WS_URL,
   PRIVATE_KEY,
+  resolveServiceConfig,
 } from "./config.js";
 import { createPaymentFetch, getPaymentMode } from "./x402Client.js";
 import { CoordinatorClient } from "./coordinatorClient.js";
@@ -16,49 +14,58 @@ async function main() {
   console.log("║        KronoScan — Buyer Agent           ║");
   console.log("╚══════════════════════════════════════════╝\n");
 
-  console.log(`Coordinator:  ${COORDINATOR_WS_URL}`);
-  console.log(`Seller API:   ${SELLER_API_URL}`);
-  console.log(`Seller addr:  ${SELLER_ADDRESS}`);
-  console.log(`Deposit:      ${DEPOSIT_AMOUNT}`);
-  console.log(`Price/req:    ${PRICE_PER_REQUEST}`);
+  // Step 1: Resolve service config via ENS
+  console.log("-- Resolving service config --");
+  const svc = await resolveServiceConfig();
+
+  console.log(`\nCoordinator:  ${COORDINATOR_WS_URL}`);
+  console.log(`Seller API:   ${svc.sellerApiUrl}`);
+  console.log(`Seller addr:  ${svc.sellerAddress}`);
+  console.log(`ENS name:     ${svc.ensName || "(none)"}`);
+  console.log(`ENS resolved: ${svc.ensResolved}`);
+  console.log(`Deposit:      ${svc.depositAmount}`);
+  console.log(`Price/req:    ${svc.pricePerRequest}`);
   console.log(`Verified:     ${WORLD_ID_VERIFIED}`);
   console.log(`Private key:  ${PRIVATE_KEY ? "set" : "not set"}`);
 
-  // Step 1: Initialize x402 payment client
+  // Step 2: Initialize x402 payment client
   console.log("\n-- Initializing x402 payment client --");
   const paymentFetch = await createPaymentFetch();
   console.log(`Payment mode: ${getPaymentMode()}\n`);
 
-  // Step 2: Connect to coordinator
+  // Step 3: Connect to coordinator
   console.log("-- Connecting to coordinator --");
   const coordinator = new CoordinatorClient();
   await coordinator.connect();
 
-  // Step 3: Open session
+  // Step 4: Open session
   console.log("\n-- Opening session --");
   const session = await coordinator.openSession(
-    SELLER_ADDRESS,
-    PRICE_PER_REQUEST,
-    DEPOSIT_AMOUNT,
+    svc.sellerAddress,
+    svc.pricePerRequest,
+    svc.depositAmount,
     WORLD_ID_VERIFIED,
+    svc.ensName,
   );
   console.log(`Session:      ${session.sessionId}`);
   console.log(`Eff. price:   ${session.effectivePrice}`);
   console.log(`Deposit:      ${session.deposit}`);
 
-  // Step 4: Run audit
+  // Step 5: Run audit (use resolved API URL)
   const summary = await runAudit(
     paymentFetch,
     coordinator,
     session.sessionId,
     session.effectivePrice,
+    undefined,
+    svc.sellerApiUrl,
   );
 
-  // Step 5: Close session
+  // Step 6: Close session
   console.log("\n-- Closing session --");
   const closed = await coordinator.closeSession(session.sessionId);
 
-  // Step 6: Print summary
+  // Step 7: Print summary
   const txDisplay =
     closed.txHash.length > 20
       ? `${closed.txHash.slice(0, 18)}...`
@@ -67,6 +74,7 @@ async function main() {
   console.log("\n╔══════════════════════════════════════════╗");
   console.log("║            AUDIT COMPLETE                ║");
   console.log("╠══════════════════════════════════════════╣");
+  console.log(`║  Service:     ${(svc.ensName || svc.sellerAddress).padEnd(28)}║`);
   console.log(`║  Categories:  10/10                      ║`);
   console.log(`║  Findings:    ${String(summary.totalFindings).padEnd(28)}║`);
   console.log(`║  CRITICAL:    ${String(summary.bySeverity["CRITICAL"] ?? 0).padEnd(28)}║`);

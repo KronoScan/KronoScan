@@ -24,3 +24,80 @@ export const AUDIT_CATEGORIES = [
 ] as const;
 
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
+
+import { resolveService, type ServiceConfig } from "../../shared/ensResolver.js";
+
+export const ENS_SERVICE_NAME = process.env.ENS_SERVICE_NAME ?? "";
+export const SEPOLIA_RPC = process.env.SEPOLIA_RPC ?? "https://ethereum-sepolia-rpc.publicnode.com";
+
+export interface ResolvedConfig {
+  sellerAddress: Address;
+  sellerApiUrl: string;
+  pricePerRequest: string;
+  depositAmount: string;
+  ensName: string;
+  ensResolved: boolean;
+  ensip25: boolean;
+}
+
+export async function resolveServiceConfig(): Promise<ResolvedConfig> {
+  if (!ENS_SERVICE_NAME) {
+    console.log("[ens] ENS_SERVICE_NAME not set — using .env values");
+    return {
+      sellerAddress: SELLER_ADDRESS,
+      sellerApiUrl: SELLER_API_URL,
+      pricePerRequest: PRICE_PER_REQUEST,
+      depositAmount: DEPOSIT_AMOUNT,
+      ensName: "",
+      ensResolved: false,
+      ensip25: false,
+    };
+  }
+
+  console.log(`[ens] Resolving ${ENS_SERVICE_NAME} on Sepolia...`);
+  try {
+    const svc = await resolveService(ENS_SERVICE_NAME, SEPOLIA_RPC);
+    if (!svc) {
+      console.warn(`[ens] Name did not resolve — falling back to .env`);
+      return {
+        sellerAddress: SELLER_ADDRESS,
+        sellerApiUrl: SELLER_API_URL,
+        pricePerRequest: PRICE_PER_REQUEST,
+        depositAmount: DEPOSIT_AMOUNT,
+        ensName: ENS_SERVICE_NAME,
+        ensResolved: false,
+        ensip25: false,
+      };
+    }
+
+    console.log(`[ens] Resolved successfully:`);
+    console.log(`  Seller:      ${svc.sellerAddress}`);
+    console.log(`  API URL:     ${svc.apiUrl || "(not set, using .env)"}`);
+    console.log(`  Price:       ${svc.pricePerRequest || "(not set, using .env)"}`);
+    console.log(`  Categories:  ${svc.categories.length}`);
+    console.log(`  Network:     ${svc.network}`);
+    console.log(`  Payment:     ${svc.paymentProtocol}`);
+    console.log(`  ENSIP-25:    ${svc.ensip25 ? "verified" : "not set"}`);
+
+    return {
+      sellerAddress: (svc.sellerAddress || SELLER_ADDRESS) as Address,
+      sellerApiUrl: svc.apiUrl || SELLER_API_URL,
+      pricePerRequest: svc.pricePerRequest || PRICE_PER_REQUEST,
+      depositAmount: DEPOSIT_AMOUNT,
+      ensName: ENS_SERVICE_NAME,
+      ensResolved: true,
+      ensip25: svc.ensip25,
+    };
+  } catch (err) {
+    console.warn(`[ens] Resolution failed — falling back to .env:`, err instanceof Error ? err.message : err);
+    return {
+      sellerAddress: SELLER_ADDRESS,
+      sellerApiUrl: SELLER_API_URL,
+      pricePerRequest: PRICE_PER_REQUEST,
+      depositAmount: DEPOSIT_AMOUNT,
+      ensName: ENS_SERVICE_NAME,
+      ensResolved: false,
+      ensip25: false,
+    };
+  }
+}
