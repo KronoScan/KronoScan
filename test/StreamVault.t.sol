@@ -184,7 +184,7 @@ contract StreamVaultTest is Test {
         bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
 
         vm.prank(seller);
-        vm.expectRevert("Only buyer");
+        vm.expectRevert(StreamVault.OnlyBuyer.selector);
         vault.topUp(streamId, 500_000);
     }
 
@@ -196,7 +196,7 @@ contract StreamVaultTest is Test {
         vault.closeStream(streamId, 0);
 
         vm.prank(buyer);
-        vm.expectRevert("Not active");
+        vm.expectRevert(StreamVault.NotActive.selector);
         vault.topUp(streamId, 500_000);
     }
 
@@ -251,7 +251,7 @@ contract StreamVaultTest is Test {
         bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
 
         vm.prank(buyer);
-        vm.expectRevert("Only coordinator");
+        vm.expectRevert(StreamVault.OnlyCoordinator.selector);
         vault.closeStream(streamId, 0);
     }
 
@@ -260,7 +260,7 @@ contract StreamVaultTest is Test {
         bytes32 streamId = vault.openStream(seller, RATE, DEPOSIT, false);
 
         vm.prank(coordinator);
-        vm.expectRevert("Consumed exceeds deposit");
+        vm.expectRevert(StreamVault.ConsumedExceedsDeposit.selector);
         vault.closeStream(streamId, DEPOSIT + 1);
     }
 
@@ -272,7 +272,7 @@ contract StreamVaultTest is Test {
         vault.closeStream(streamId, 0);
 
         vm.prank(coordinator);
-        vm.expectRevert("Not active");
+        vm.expectRevert(StreamVault.NotActive.selector);
         vault.closeStream(streamId, 0);
     }
 
@@ -307,7 +307,7 @@ contract StreamVaultTest is Test {
 
         vm.warp(block.timestamp + 5000);
 
-        vm.expectRevert("Still solvent");
+        vm.expectRevert(StreamVault.StillSolvent.selector);
         vault.terminateInsolvency(streamId);
     }
 
@@ -317,7 +317,7 @@ contract StreamVaultTest is Test {
 
         vm.warp(block.timestamp + 10015); // insolvent but within grace
 
-        vm.expectRevert("Grace period active");
+        vm.expectRevert(StreamVault.GracePeriodActive.selector);
         vault.terminateInsolvency(streamId);
     }
 
@@ -328,7 +328,7 @@ contract StreamVaultTest is Test {
         // Effective rate = 80 → insolvency at 1_000_000/80 = 12500s
         vm.warp(block.timestamp + 12500);
 
-        vm.expectRevert("Still solvent");
+        vm.expectRevert(StreamVault.StillSolvent.selector);
         vault.terminateInsolvency(streamId);
 
         vm.warp(block.timestamp + 31); // past grace
@@ -346,7 +346,7 @@ contract StreamVaultTest is Test {
         vault.closeStream(streamId, 0);
 
         vm.warp(block.timestamp + 20000);
-        vm.expectRevert("Not active");
+        vm.expectRevert(StreamVault.NotActive.selector);
         vault.terminateInsolvency(streamId);
     }
 

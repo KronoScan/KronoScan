@@ -17,6 +17,13 @@ contract StreamVault {
     uint256 public constant VERIFIED_DISCOUNT_BPS = 2000;
     uint256 public constant BPS_BASE = 10000;
 
+    error OnlyCoordinator();
+    error NotActive();
+    error OnlyBuyer();
+    error ConsumedExceedsDeposit();
+    error StillSolvent();
+    error GracePeriodActive();
+
     enum StreamStatus { ACTIVE, CLOSED, TERMINATED }
 
     struct Stream {
@@ -43,7 +50,7 @@ contract StreamVault {
     event StreamToppedUp(bytes32 indexed streamId, uint256 amount, uint256 newTotal);
 
     modifier onlyCoordinator() {
-        require(msg.sender == coordinator, "Only coordinator");
+        if (msg.sender != coordinator) revert OnlyCoordinator();
         _;
     }
 
@@ -98,8 +105,8 @@ contract StreamVault {
 
     function topUp(bytes32 streamId, uint256 amount) external {
         Stream storage s = streams[streamId];
-        require(s.status == StreamStatus.ACTIVE, "Not active");
-        require(msg.sender == s.buyer, "Only buyer");
+        if (s.status != StreamStatus.ACTIVE) revert NotActive();
+        if (msg.sender != s.buyer) revert OnlyBuyer();
 
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         s.depositedAmount += amount;
@@ -109,8 +116,8 @@ contract StreamVault {
 
     function closeStream(bytes32 streamId, uint256 actualConsumed) external onlyCoordinator {
         Stream storage s = streams[streamId];
-        require(s.status == StreamStatus.ACTIVE, "Not active");
-        require(actualConsumed <= s.depositedAmount, "Consumed exceeds deposit");
+        if (s.status != StreamStatus.ACTIVE) revert NotActive();
+        if (actualConsumed > s.depositedAmount) revert ConsumedExceedsDeposit();
 
         s.status = StreamStatus.CLOSED;
         s.closedTime = block.timestamp;
@@ -128,14 +135,14 @@ contract StreamVault {
 
     function terminateInsolvency(bytes32 streamId) external {
         Stream storage s = streams[streamId];
-        require(s.status == StreamStatus.ACTIVE, "Not active");
+        if (s.status != StreamStatus.ACTIVE) revert NotActive();
 
         uint256 elapsed = block.timestamp - s.startTime;
         uint256 consumed = elapsed * s.effectiveRate;
-        require(consumed > s.depositedAmount, "Still solvent");
+        if (consumed <= s.depositedAmount) revert StillSolvent();
 
         uint256 insolvencyStart = s.startTime + (s.depositedAmount / s.effectiveRate);
-        require(block.timestamp >= insolvencyStart + GRACE_PERIOD, "Grace period active");
+        if (block.timestamp < insolvencyStart + GRACE_PERIOD) revert GracePeriodActive();
 
         s.status = StreamStatus.TERMINATED;
         s.closedTime = insolvencyStart;
