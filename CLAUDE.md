@@ -10,10 +10,10 @@ This is the master context file for the KronoScan project. It contains everythin
 
 | Command | Description |
 |---------|-------------|
-| `forge build` | Compile contracts |
-| `forge test` | Run Solidity tests |
-| `forge test -vvv` | Run tests with verbose trace |
-| `forge script script/Deploy.s.sol --rpc-url $ARC_TESTNET_RPC --broadcast` | Deploy to Arc testnet |
+| `cd contracts && forge build` | Compile contracts |
+| `cd contracts && forge test` | Run Solidity tests |
+| `cd contracts && forge test -vvv` | Run tests with verbose trace |
+| `cd contracts && forge script script/Deploy.s.sol --rpc-url $ARC_TESTNET_RPC --broadcast` | Deploy to Arc testnet |
 | `cd coordinator && npm run dev` | Start coordinator server |
 | `cd seller-api && npm run dev` | Start seller API |
 | `cd agent && npx tsx src/index.ts` | Run buyer agent demo |
@@ -728,14 +728,15 @@ Martin's previous project (https://github.com/MBarralDevs/StabL) built an intent
 
 ```
 kronoscan/
-├── src/                        # Solidity contracts (Foundry convention)
-│   └── StreamVault.sol
-├── test/                       # Solidity tests (Foundry convention)
-│   └── StreamVault.t.sol
-├── script/                     # Foundry deploy scripts
-│   └── Deploy.s.sol
-├── lib/                        # Foundry dependencies (forge install)
-├── foundry.toml
+├── contracts/                  # Foundry — all Solidity
+│   ├── src/
+│   │   └── StreamVault.sol
+│   ├── test/
+│   │   └── StreamVault.t.sol
+│   ├── script/
+│   │   └── Deploy.s.sol
+│   ├── lib/                    # Foundry deps (forge-std, openzeppelin)
+│   └── foundry.toml
 ├── coordinator/
 │   ├── src/
 │   │   ├── index.ts            # Express + WS server
@@ -743,35 +744,32 @@ kronoscan/
 │   │   ├── vaultClient.ts      # StreamVault on-chain interactions
 │   │   ├── abi.ts              # StreamVault ABI
 │   │   ├── types.ts            # Shared types
-│   │   ├── errors.ts           # Custom error classes
-│   │   ├── ensResolver.ts      # ENS name resolution
-│   │   └── worldId.ts          # World ID verification
+│   │   └── errors.ts           # Custom error classes
 │   └── package.json
 ├── seller-api/
 │   ├── src/
 │   │   ├── index.ts            # Express + x402 middleware
-│   │   ├── categories/         # 10 audit category handlers
 │   │   ├── sourceResolver.ts   # Fetch verified source from block explorer
 │   │   └── findings.ts         # Pre-written vulnerability findings (fallback)
 │   └── package.json
 ├── agent/
 │   ├── src/
 │   │   ├── index.ts            # Demo audit agent script
-│   │   ├── sessionClient.ts    # KronoScan client SDK
-│   │   ├── wallet.ts           # Agent wallet management
-│   │   └── sampleContract.ts   # Vulnerable Solidity contract for demo
+│   │   ├── config.ts           # Config + ENS resolution
+│   │   ├── auditRunner.ts      # 10-category audit loop
+│   │   ├── coordinatorClient.ts # WebSocket client
+│   │   └── x402Client.ts       # Payment client
 │   └── package.json
+├── shared/
+│   └── ensResolver.ts          # ENS name → ServiceConfig resolver
+├── scripts/
+│   └── ens-setup.ts            # One-time ENS subname + text records setup
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx            # Main dashboard
-│   │   └── components/
-│   │       ├── CostMeter.tsx
-│   │       ├── CategoryProgress.tsx
-│   │       ├── FindingsPanel.tsx
-│   │       ├── AgentIdentity.tsx
-│   │       └── RefundSummary.tsx
+│   │   └── page.tsx            # Main dashboard
 │   ├── package.json
 │   └── next.config.js
+├── docs/                       # Specs and plans
 ├── CLAUDE.md                   # This file
 └── README.md
 ```

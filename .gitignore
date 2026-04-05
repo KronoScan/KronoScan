@@ -1,16 +1,16 @@
 # Foundry
-out/
-cache/
+contracts/out/
+contracts/cache/
 
 # Broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+!/contracts/broadcast
+/contracts/broadcast/*/31337/
+/contracts/broadcast/**/dry-run/
 
 # Env
 .env
 
-# Node (for later phases)
+# Node
 node_modules/
 
 # OS
