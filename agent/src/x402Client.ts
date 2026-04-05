@@ -1,4 +1,4 @@
-import { PRIVATE_KEY } from "./config.js";
+import { PRIVATE_KEY, PAYMENT_MODE } from "./config.js";
 
 type PaymentFetch = (
   url: string | URL | Request,
@@ -122,6 +122,12 @@ function createFallbackFetch(): PaymentFetch {
 }
 
 export async function createPaymentFetch(): Promise<PaymentFetch> {
+  if (PAYMENT_MODE === "fallback") {
+    console.log("[x402] PAYMENT_MODE=fallback — skipping real SDK");
+    mode = "fallback";
+    return createFallbackFetch();
+  }
+
   const realFetch = await initRealX402();
   if (realFetch) {
     mode = "x402-sdk";
