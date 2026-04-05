@@ -35,7 +35,32 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d.get\\(k\\) for k in ['main','module','exports','types','typings']}, indent=2\\)\\)\")",
       "Bash(python3 -c \"import sys,json; p=json.load\\(sys.stdin\\); print\\('exports:', list\\(p.get\\('exports', {}\\).keys\\(\\)\\)[:20]\\); print\\('main:', p.get\\('main'\\)\\); print\\('types:', p.get\\('types'\\)\\)\")",
       "Bash(kill %1 %2)",
-      "Bash(wait)"
+      "Bash(wait)",
+      "Bash(ls /home/mbarr/Cannes2026/.env*)",
+      "Bash(ls /home/mbarr/Cannes2026/seller-api/.env*)",
+      "Bash(ls /home/mbarr/Cannes2026/agent/.env*)",
+      "Bash(ls /home/mbarr/Cannes2026/coordinator/.env*)",
+      "WebSearch",
+      "WebFetch(domain:docs.arc.network)",
+      "Bash(npm run:*)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(lsof -ti:3001 -ti:3002)",
+      "Bash(xargs kill:*)",
+      "Bash(npm ls:*)",
+      "Bash(echo \"Coordinator PID: $!\")",
+      "Read(//tmp/**)",
+      "Bash(echo \"Seller PID: $!\")",
+      "Bash(curl -s -D- http://localhost:3002/api/audit/reentrancy -X POST -H \"Content-Type: application/json\" -d '{}')",
+      "WebFetch(domain:docs.x402.org)",
+      "Bash(curl -s http://localhost:3002/api/audit/reentrancy -X POST -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(lsof -ti:3002)",
+      "WebFetch(domain:ethglobal.com)",
+      "WebFetch(domain:docs.world.org)",
+      "Bash(npm info:*)",
+      "WebFetch(domain:docs.ens.domains)",
+      "Bash(npm init:*)",
+      "Bash(git mv:*)"
     ]
   }
 }

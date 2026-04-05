@@ -1,0 +1,29 @@
+{
+  "name": "cannes2026",
+  "version": "1.0.0",
+  "description": "**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KronoScan/KronoScan.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/KronoScan/KronoScan/issues"
+  },
+  "homepage": "https://github.com/KronoScan/KronoScan#readme",
+  "dependencies": {
+    "dotenv": "^17.4.0",
+    "viem": "^2.47.10"
+  }
+}
