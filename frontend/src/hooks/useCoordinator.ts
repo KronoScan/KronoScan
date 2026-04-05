@@ -24,6 +24,7 @@ interface CoordinatorState {
   findings: AuditFinding[]
   closedData: ClosedData | null
   connected: boolean
+  categoryTxHashes: Record<string, string>
 }
 
 interface CoordinatorHook extends CoordinatorState {
@@ -44,6 +45,7 @@ const INITIAL_STATE: CoordinatorState = {
   findings: [],
   closedData: null,
   connected: false,
+  categoryTxHashes: {},
 }
 
 export function useCoordinator(): CoordinatorHook {
@@ -131,18 +133,26 @@ export function useCoordinator(): CoordinatorHook {
               requestCount: 0,
               requestsRemaining: 0,
               completedCategories: [],
+              categoryTxHashes: {},
             }))
             break
 
           case 'session_update':
-            setState(prev => ({
-              ...prev,
-              totalConsumed: BigInt(msg.totalConsumed ?? '0'),
-              requestCount: Number(msg.requestCount ?? 0),
-              requestsRemaining: Number(msg.requestsRemaining ?? 0),
-              completedCategories: msg.completedCategories ?? prev.completedCategories,
-              status: (msg.status as SessionStatus) ?? prev.status,
-            }))
+            setState(prev => {
+              const newTxHashes = { ...prev.categoryTxHashes }
+              if (msg.lastCategory && msg.categoryTxHash) {
+                newTxHashes[msg.lastCategory] = msg.categoryTxHash
+              }
+              return {
+                ...prev,
+                totalConsumed: BigInt(msg.totalConsumed ?? '0'),
+                requestCount: Number(msg.requestCount ?? 0),
+                requestsRemaining: Number(msg.requestsRemaining ?? 0),
+                completedCategories: msg.completedCategories ?? prev.completedCategories,
+                status: (msg.status as SessionStatus) ?? prev.status,
+                categoryTxHashes: newTxHashes,
+              }
+            })
             break
 
           case 'session_closed':

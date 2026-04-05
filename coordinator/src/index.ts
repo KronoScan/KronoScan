@@ -2,6 +2,8 @@ import "./env.js";
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
+import { spawn, type ChildProcess } from "child_process";
+import { resolve } from "path";
 import type { Hex, Address } from "viem";
 import { SessionManager } from "./sessionManager.js";
 import { VaultClient } from "./vaultClient.js";
@@ -36,6 +38,13 @@ if (VAULT_ADDRESS && COORDINATOR_KEY) {
 
 const app = express();
 app.use(express.json());
+app.use((_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+  next();
+});
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", sessions: sessionManager.getActiveSessionIds().length });
@@ -78,6 +87,46 @@ app.get("/api/sessions", (_req, res) => {
     };
   });
   res.json({ sessions });
+});
+
+// ─── Start Audit (spawn agent) ───
+
+let agentProcess: ChildProcess | null = null;
+
+app.post("/api/start-audit", (_req, res) => {
+  if (agentProcess && agentProcess.exitCode === null) {
+    res.status(409).json({ error: "Agent is already running" });
+    return;
+  }
+
+  const agentDir = resolve(import.meta.dirname, "../../agent");
+  agentProcess = spawn("node", ["dist/agent/src/index.js"], {
+    cwd: agentDir,
+    stdio: "pipe",
+    env: { ...process.env },
+  });
+
+  agentProcess.stdout?.on("data", (data: Buffer) => {
+    process.stdout.write(`[agent] ${data.toString()}`);
+  });
+
+  agentProcess.stderr?.on("data", (data: Buffer) => {
+    process.stderr.write(`[agent] ${data.toString()}`);
+  });
+
+  agentProcess.on("close", (code) => {
+    console.log(`[agent] Process exited with code ${code}`);
+    agentProcess = null;
+  });
+
+  console.log("[agent] Spawned agent process");
+  res.json({ status: "started" });
+});
+
+app.get("/api/agent-status", (_req, res) => {
+  res.json({
+    running: agentProcess !== null && agentProcess.exitCode === null,
+  });
 });
 
 // ─── HTTP Server ───
@@ -225,10 +274,11 @@ async function handleRecordPayment(
   sessionManager.recordPayment(sessionId, amount, category);
 
   // Report consumption on-chain
+  let consumptionTxHash: Hex | undefined;
   if (vaultClient) {
     try {
-      const txHash = await vaultClient.reportConsumption(sessionId, amount);
-      console.log(`[vault] reportConsumption tx: ${txHash}`);
+      consumptionTxHash = await vaultClient.reportConsumption(sessionId, amount);
+      console.log(`[vault] reportConsumption tx: ${consumptionTxHash}`);
     } catch (err) {
       console.error("[vault] reportConsumption failed:", err);
     }
@@ -246,6 +296,8 @@ async function handleRecordPayment(
     requestsRemaining: remaining,
     requestCount: session.requestCount,
     completedCategories: session.completedCategories,
+    lastCategory: category,
+    categoryTxHash: consumptionTxHash,
   });
 }
 

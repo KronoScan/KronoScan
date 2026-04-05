@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import { AUDIT_CATEGORIES } from "./types.js";
+import { AUDIT_CATEGORIES, CATEGORY_PRICES } from "./types.js";
 
 const SELLER_ADDRESS = process.env.SELLER_ADDRESS ?? "0x0000000000000000000000000000000000000000";
 const USDC_ADDRESS = process.env.USDC_ADDRESS ?? "0x3600000000000000000000000000000000000000";

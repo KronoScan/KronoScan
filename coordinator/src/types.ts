@@ -36,7 +36,7 @@ export type WsMessageIn =
 
 export type WsMessageOut =
   | { type: "session_opened"; sessionId: Hex; effectivePrice: string; deposit: string; startTime: number; ensName?: string }
-  | { type: "session_update"; sessionId: Hex; status: SessionStatus; totalConsumed: string; requestsRemaining: number; requestCount: number; completedCategories: string[] }
+  | { type: "session_update"; sessionId: Hex; status: SessionStatus; totalConsumed: string; requestsRemaining: number; requestCount: number; completedCategories: string[]; lastCategory?: string; categoryTxHash?: Hex }
   | { type: "session_closed"; sessionId: Hex; consumed: string; refunded: string; txHash: Hex }
   | { type: "finding"; sessionId: Hex; finding: AuditFinding }
   | { type: "error"; message: string };

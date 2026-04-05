@@ -29,6 +29,20 @@ export const AUDIT_CATEGORIES = [
 
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
+// Per-category pricing (atomic USDC, 6 decimals) — must match seller-api/src/types.ts
+export const CATEGORY_PRICES: Record<AuditCategory, string> = {
+  "reentrancy":       "150",
+  "access-control":   "120",
+  "arithmetic":        "80",
+  "external-calls":   "130",
+  "token-standards":   "70",
+  "business-logic":   "200",
+  "gas-optimization":  "60",
+  "code-quality":      "50",
+  "compiler":          "40",
+  "defi":             "180",
+};
+
 import { resolveService, type ServiceConfig } from "../../shared/ensResolver.js";
 
 export const ENS_SERVICE_NAME = process.env.ENS_SERVICE_NAME ?? "";

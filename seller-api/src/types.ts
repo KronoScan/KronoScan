@@ -15,6 +15,22 @@ export const AUDIT_CATEGORIES = [
 
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
+// ─── Per-Category Pricing (atomic USDC, 6 decimals) ───
+// e.g. 150 = 0.000150 USDC — complex categories cost more
+
+export const CATEGORY_PRICES: Record<AuditCategory, number> = {
+  "reentrancy":       150,
+  "access-control":   120,
+  "arithmetic":        80,
+  "external-calls":   130,
+  "token-standards":   70,
+  "business-logic":   200,
+  "gas-optimization":  60,
+  "code-quality":      50,
+  "compiler":          40,
+  "defi":             180,
+};
+
 // ─── Findings ───
 
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";

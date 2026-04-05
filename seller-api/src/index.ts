@@ -1,6 +1,6 @@
 import "./env.js";
 import express from "express";
-import { AUDIT_CATEGORIES, type AuditCategory, type AuditRequestBody, type ScanMode, type AuditFinding } from "./types.js";
+import { AUDIT_CATEGORIES, CATEGORY_PRICES, type AuditCategory, type AuditRequestBody, type ScanMode, type AuditFinding } from "./types.js";
 import { getFindingsForCategory } from "./findings.js";
 import { analyzeWithDeepSeek } from "./deepseekAnalyzer.js";
 import { resolveSource } from "./sourceResolver.js";
@@ -11,6 +11,13 @@ const PORT = parseInt(process.env.SELLER_PORT ?? "3002", 10);
 
 const app = express();
 app.use(express.json());
+app.use((_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+  next();
+});
 
 // Debug: log all incoming requests and responses
 app.use((req, res, next) => {
@@ -42,6 +49,32 @@ app.get("/api/sample-contract", (_req, res) => {
 
 app.get("/api/categories", (_req, res) => {
   res.json({ categories: AUDIT_CATEGORIES });
+});
+
+// ─── Per-category pricing ───
+
+app.get("/api/pricing", (_req, res) => {
+  res.json({ prices: CATEGORY_PRICES });
+});
+
+// ─── Resolve on-chain source ───
+
+app.post("/api/resolve-source", async (req, res) => {
+  const { contractAddress, chain } = req.body as { contractAddress?: string; chain?: string };
+  if (!contractAddress) {
+    res.status(400).json({ error: "contractAddress is required" });
+    return;
+  }
+  try {
+    const source = await resolveSource(contractAddress, chain ?? "arc-testnet");
+    if (!source) {
+      res.status(404).json({ error: "Contract not verified on block explorer" });
+      return;
+    }
+    res.json({ source });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch source" });
+  }
 });
 
 // ─── 10 Audit Category Routes ───
@@ -115,7 +148,7 @@ async function handleAuditCategory(
 
   for (const finding of findings) {
     res.write(`data: ${JSON.stringify(finding)}\n\n`);
-    await sleep(source === "deepseek" ? 500 : 1500);
+    await sleep(source === "deepseek" ? 150 : 300);
   }
 
   res.write(`data: ${JSON.stringify({ type: "category_complete", category, findingCount: findings.length, source, scanMode })}\n\n`);

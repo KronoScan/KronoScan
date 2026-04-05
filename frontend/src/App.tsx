@@ -22,23 +22,124 @@ const DEMO_CATEGORIES = [
 ]
 
 const SAMPLE_CONTRACT = `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract VulnerableVault {
+    address public owner;
+    IERC20 public token;
     mapping(address => uint256) public balances;
+    mapping(address => bool) public authorized;
+    uint256 public totalDeposits;
+    uint256 public feePercent = 5;
+    bool public paused;
 
-    function deposit() external payable {
-        balances[msg.sender] += msg.value;
+    event Deposit(address user, uint256 amount);
+    event Withdrawal(address user, uint256 amount);
+
+    constructor(address _token) {
+        owner = msg.sender;
+        token = IERC20(_token);
     }
 
+    // Missing access control: anyone can set fee
+    function setFeePercent(uint256 _fee) external {
+        feePercent = _fee;
+    }
+
+    // Missing zero-address check
+    function setOwner(address _newOwner) external {
+        require(msg.sender == owner, "Not owner");
+        owner = _newOwner;
+    }
+
+    function deposit(uint256 amount) external {
+        require(!paused, "Paused");
+        token.transferFrom(msg.sender, address(this), amount);
+        balances[msg.sender] += amount;
+        totalDeposits += amount;
+        emit Deposit(msg.sender, amount);
+    }
+
+    // Reentrancy: state updated after external call
     function withdraw(uint256 amount) external {
-        require(balances[msg.sender] >= amount);
-        (bool ok,) = msg.sender.call{value: amount}("");
-        require(ok);
-        // ⚠ State update AFTER external call — reentrancy!
+        require(balances[msg.sender] >= amount, "Insufficient");
+        uint256 fee = amount * feePercent / 100;
+        uint256 payout = amount - fee;
+        token.transfer(msg.sender, payout);
+        token.transfer(owner, fee);
         balances[msg.sender] -= amount;
+        totalDeposits -= amount;
+        emit Withdrawal(msg.sender, amount);
+    }
+
+    // Division before multiplication (precision loss)
+    function calculateReward(uint256 amount, uint256 rate) public pure returns (uint256) {
+        return amount / 1000 * rate;
+    }
+
+    // Unchecked return value on transfer
+    function emergencyTransfer(address to, uint256 amount) external {
+        require(msg.sender == owner, "Not owner");
+        token.transfer(to, amount);
+    }
+
+    // No event emitted for critical state change
+    function pause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = true;
+    }
+
+    function unpause() external {
+        require(msg.sender == owner, "Not owner");
+        paused = false;
+    }
+
+    // Uses tx.origin instead of msg.sender
+    function authorizeUser(address user) external {
+        require(tx.origin == owner, "Not owner");
+        authorized[user] = true;
+    }
+
+    // Unbounded loop: gas DoS if array grows
+    function batchTransfer(address[] calldata recipients, uint256 amount) external {
+        require(msg.sender == owner, "Not owner");
+        for (uint256 i = 0; i < recipients.length; i++) {
+            token.transfer(recipients[i], amount);
+        }
+    }
+
+    // Magic number, unclear intent
+    function isWhale(uint256 amount) public pure returns (bool) {
+        return amount > 1000000000000000000000;
+    }
+
+    // Old Solidity pattern, should use custom errors
+    function adminWithdraw(uint256 amount) external {
+        require(msg.sender == owner, "Not owner");
+        require(amount <= address(this).balance, "Insufficient ETH");
+        payable(owner).transfer(amount);
     }
 }`
+
+// --- ARCSCAN ---
+const ARCSCAN_BASE = 'https://testnet.arcscan.app'
+function arcscanTx(hash: string): string { return `${ARCSCAN_BASE}/tx/${hash}` }
+
+// --- PER-CATEGORY PRICING (must match seller-api/src/types.ts) ---
+const CATEGORY_PRICES: Record<string, bigint> = {
+  'reentrancy':       150n,
+  'access-control':   120n,
+  'arithmetic':        80n,
+  'external-calls':   130n,
+  'token-standards':   70n,
+  'business-logic':   200n,
+  'gas-optimization':  60n,
+  'code-quality':      50n,
+  'compiler':          40n,
+  'defi':             180n,
+}
 
 // --- SEVERITY CONFIG ---
 const SEV: Record<string, { border: string; badge: string; text: string }> = {
@@ -48,10 +149,38 @@ const SEV: Record<string, { border: string; badge: string; text: string }> = {
   LOW:      { border: '#10b981', badge: 'rgba(16,185,129,0.1)',  text: '#10b981' },
 }
 
-// --- FINDING CARD ---
-function FindingCard({ finding }: { finding: AuditFinding }) {
-  const s = SEV[finding.severity]
+// --- ARCSCAN LINK ---
+function ArcScanLink({ hash, label }: { hash: string; label?: string }) {
+  if (!hash || hash === '0x0') return null
   return (
+    <a
+      href={arcscanTx(hash)}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        fontSize: 10, fontFamily: 'JetBrains Mono, monospace',
+        color: '#10b981', textDecoration: 'none',
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        background: 'rgba(16,185,129,0.08)',
+        border: '1px solid rgba(16,185,129,0.2)',
+        borderRadius: 4, padding: '2px 8px',
+        transition: 'all 0.15s',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(16,185,129,0.15)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(16,185,129,0.08)' }}
+    >
+      {label ?? `${hash.slice(0, 6)}...${hash.slice(-4)}`}
+      <span style={{ fontSize: 9 }}>↗</span>
+    </a>
+  )
+}
+
+// --- FINDING CARD ---
+function FindingCard({ finding, txHash }: { finding: AuditFinding; txHash?: string }) {
+  const s = SEV[finding.severity]
+  const hasLink = txHash && txHash !== '0x0'
+
+  const card = (
     <div className="finding-card" style={{
       borderRadius: 8,
       background: 'rgba(10,26,18,0.6)',
@@ -59,7 +188,12 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
       borderLeft: `3px solid ${s.border}`,
       padding: '10px 12px',
       display: 'flex', flexDirection: 'column', gap: 5,
-    }}>
+      cursor: hasLink ? 'pointer' : 'default',
+      transition: 'all 0.15s',
+    }}
+      onMouseEnter={e => { if (hasLink) e.currentTarget.style.background = 'rgba(10,26,18,0.85)' }}
+      onMouseLeave={e => { if (hasLink) e.currentTarget.style.background = 'rgba(10,26,18,0.6)' }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{
           fontSize: 9, fontWeight: 700, padding: '2px 6px',
@@ -70,15 +204,43 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
         <span style={{ fontSize: 12.5, fontWeight: 600, color: '#e2f5ee', letterSpacing: '-0.01em' }}>
           {finding.title}
         </span>
+        {finding.category && (
+          <span style={{
+            fontSize: 9, padding: '1px 6px', borderRadius: 3,
+            background: 'rgba(16,185,129,0.06)', color: '#4a7a6a',
+            fontFamily: 'JetBrains Mono, monospace', marginLeft: 'auto', flexShrink: 0,
+          }}>{finding.category}</span>
+        )}
+        {hasLink && (
+          <span style={{
+            fontSize: 9, padding: '1px 6px', borderRadius: 3,
+            background: 'rgba(16,185,129,0.1)', color: '#10b981',
+            fontFamily: 'JetBrains Mono, monospace', flexShrink: 0,
+          }}>tx ↗</span>
+        )}
       </div>
       <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#2a4a3a' }}>
         line {finding.line}
+        {hasLink && (
+          <span style={{ marginLeft: 8, color: '#10b981', fontSize: 9 }}>
+            {txHash!.slice(0, 8)}...{txHash!.slice(-4)}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 11.5, color: '#4a7a6a', lineHeight: 1.5 }}>
         {finding.description}
       </div>
     </div>
   )
+
+  if (hasLink) {
+    return (
+      <a href={arcscanTx(txHash!)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+        {card}
+      </a>
+    )
+  }
+  return card
 }
 
 // --- EMPTY STATE ---
@@ -122,6 +284,9 @@ export default function App() {
   const [contractAddress, setContractAddress] = useState('')
   const [showLanding, setShowLanding] = useState(true)
   const [activeFilter, setActiveFilter] = useState<string | null>(null)
+  const [addressResolving, setAddressResolving] = useState(false)
+  const [addressResolved, setAddressResolved] = useState(false)
+  const [resolveError, setResolveError] = useState('')
 
   const [demoStatus, setDemoStatus] = useState<SessionStatus>('IDLE')
   const [demoFindings, setDemoFindings] = useState<AuditFinding[]>([])
@@ -130,6 +295,7 @@ export default function App() {
   const [demoIntervals, setDemoIntervals] = useState<number[]>([])
   const [scanning, setScanning] = useState(false)
 
+  const [agentStarting, setAgentStarting] = useState(false)
   const isLive = coordinator.connected && coordinator.sessionId !== null
   const status = isLive ? coordinator.status : demoStatus
   const findings = isLive ? coordinator.findings : demoFindings
@@ -170,7 +336,7 @@ export default function App() {
     const catInt = window.setInterval(() => {
       if (catIndex >= DEMO_CATEGORIES.length) return
       const cat = DEMO_CATEGORIES[catIndex]
-      consumed += 80
+      consumed += Number(CATEGORY_PRICES[cat] ?? 100n)
       catIndex++
       setDemoConsumed(consumed)
       setDemoCategories(prev => [...prev, cat])
@@ -184,7 +350,8 @@ export default function App() {
           window.setTimeout(() => {
             newIntervals.forEach(id => window.clearInterval(id))
             setDemoCategories(DEMO_CATEGORIES)
-            setDemoConsumed(80 * DEMO_CATEGORIES.length)
+            const totalDemoCost = DEMO_CATEGORIES.reduce((sum, cat) => sum + Number(CATEGORY_PRICES[cat] ?? 100n), 0)
+            setDemoConsumed(totalDemoCost)
             setDemoStatus('CLOSED')
             setScanning(false)
           }, 1200)
@@ -205,10 +372,37 @@ export default function App() {
     setScanning(false)
   }
 
+  async function startRealAudit() {
+    if (agentStarting) return
+    setAgentStarting(true)
+    try {
+      const res = await fetch('http://localhost:3001/api/start-audit', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('[audit] Failed to start:', data.error)
+        alert(data.error ?? 'Failed to start audit')
+      } else {
+        console.log('[audit] Agent started — waiting for session via WebSocket')
+      }
+    } catch (err) {
+      console.error('[audit] Failed to reach coordinator:', err)
+      alert('Cannot reach coordinator at localhost:3001. Is it running?')
+    } finally {
+      setAgentStarting(false)
+    }
+  }
+
   function handleRunAudit() {
-    if (isLive) return
-    if (status === 'CLOSED') resetDemo()
-    else startDemo()
+    if (status === 'ACTIVE' || agentStarting) return
+    if (coordinator.connected) {
+      // Connected to coordinator — launch real agent
+      if (status === 'CLOSED') coordinator.reset()
+      startRealAudit()
+    } else {
+      // Not connected — run local demo
+      if (status === 'CLOSED') resetDemo()
+      else startDemo()
+    }
   }
 
   const sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 }
@@ -287,27 +481,24 @@ export default function App() {
 
             {/* Agent info */}
             <div style={{ fontSize: 11, color: '#4a7a6a', fontFamily: 'JetBrains Mono, monospace' }}>
-              ValidatorAgent · Groq / Llama 3.3 70B
+              KronoScan Agent · AI Auditor
             </div>
-
-            {/* World ID */}
-            <div style={{
-              background: 'rgba(16,185,129,0.08)',
-              border: '1px solid rgba(16,185,129,0.2)',
-              color: '#34d399', borderRadius: 6, padding: '4px 10px',
-              fontSize: 11, fontWeight: 500,
-            }}>World ID ✓</div>
 
             {/* ENS */}
-            <div style={{
-              fontFamily: 'JetBrains Mono, monospace', fontSize: 10,
-              color: '#10b981',
-              background: 'rgba(16,185,129,0.06)',
-              border: '1px solid rgba(16,185,129,0.15)',
-              borderRadius: 6, padding: '4px 10px',
-            }}>
-              {ensName}
-            </div>
+            {ensName && (
+              <div style={{
+                fontFamily: 'JetBrains Mono, monospace', fontSize: 10,
+                color: '#10b981',
+                background: 'rgba(16,185,129,0.06)',
+                border: '1px solid rgba(16,185,129,0.15)',
+                borderRadius: 6, padding: '4px 10px',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span style={{ fontSize: 8, color: '#4a7a6a', letterSpacing: '0.06em', fontWeight: 700 }}>ENS</span>
+                <span style={{ width: 1, height: 12, background: 'rgba(16,185,129,0.2)' }} />
+                {ensName}
+              </div>
+            )}
 
             {/* Wallet */}
             {walletAddress ? (
@@ -375,7 +566,7 @@ export default function App() {
                     AI-Powered Security
                   </div>
                   <div style={{ fontSize: 11, color: '#4a7a6a', marginTop: 2 }}>
-                    Pay per request · Verified by World ID · <span style={{ color: '#10b981' }}>$0.00008/req</span>
+                    Pay per request via Circle Nanopayments · <span style={{ color: '#10b981' }}>on-chain escrow</span>
                   </div>
                 </div>
                 <div style={{
@@ -444,34 +635,70 @@ export default function App() {
                         <label style={{ fontSize: 10, fontWeight: 600, color: '#2a4a3a', letterSpacing: '0.08em', display: 'block', marginBottom: 7, fontFamily: 'JetBrains Mono, monospace' }}>
                           CONTRACT ADDRESS
                         </label>
-                        <div style={{ position: 'relative' }}>
-                          <span style={{
-                            position: 'absolute', left: 11, top: '50%',
-                            transform: 'translateY(-50%)',
-                            fontFamily: 'JetBrains Mono, monospace',
-                            fontSize: 13, color: '#2a4a3a', pointerEvents: 'none',
-                          }}>0x</span>
-                          <input
-                            value={contractAddress}
-                            onChange={e => setContractAddress(e.target.value)}
-                            placeholder="7f3a4b8c9d2e1f0a..."
-                            style={{
-                              width: '100%',
-                              background: 'rgba(10,26,18,0.6)',
-                              border: '1px solid rgba(16,185,129,0.15)',
-                              borderRadius: 7,
-                              padding: '10px 12px 10px 34px',
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <div style={{ position: 'relative', flex: 1 }}>
+                            <span style={{
+                              position: 'absolute', left: 11, top: '50%',
+                              transform: 'translateY(-50%)',
                               fontFamily: 'JetBrains Mono, monospace',
-                              fontSize: 12, color: '#e2f5ee', outline: 'none',
-                            }}
-                          />
+                              fontSize: 13, color: '#2a4a3a', pointerEvents: 'none',
+                            }}>0x</span>
+                            <input
+                              value={contractAddress}
+                              onChange={e => {
+                                setContractAddress(e.target.value)
+                                setAddressResolved(false)
+                                setResolveError('')
+                              }}
+                              placeholder="7f3a4b8c9d2e1f0a..."
+                              style={{
+                                width: '100%',
+                                background: 'rgba(10,26,18,0.6)',
+                                border: '1px solid rgba(16,185,129,0.15)',
+                                borderRadius: 7,
+                                padding: '10px 12px 10px 34px',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontSize: 12, color: '#e2f5ee', outline: 'none',
+                              }}
+                            />
+                          </div>
+                          {contractAddress.length === 40 && (
+                            <a
+                              href={`${ARCSCAN_BASE}/address/0x${contractAddress}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: 'rgba(16,185,129,0.08)',
+                                border: '1px solid rgba(16,185,129,0.2)',
+                                borderRadius: 7, padding: '0 12px',
+                                fontSize: 10, color: '#10b981', textDecoration: 'none',
+                                fontFamily: 'JetBrains Mono, monospace', flexShrink: 0,
+                              }}
+                            >ArcScan ↗</a>
+                          )}
                         </div>
                         {contractAddress.length > 0 && (
-                          <div style={{ marginTop: 5, fontSize: 11, color: contractAddress.length === 40 ? '#22c55e' : '#4a7a6a', fontFamily: 'JetBrains Mono, monospace' }}>
+                          <div style={{ marginTop: 5, fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>
                             {contractAddress.length === 40
-                              ? '✓ valid address'
-                              : `${40 - contractAddress.length} more chars`
+                              ? <span style={{ color: '#22c55e' }}>✓ valid address</span>
+                              : <span style={{ color: '#4a7a6a' }}>{40 - contractAddress.length} more chars</span>
                             }
+                          </div>
+                        )}
+                        {addressResolving && (
+                          <div style={{ marginTop: 5, fontSize: 11, color: '#f59e0b', fontFamily: 'JetBrains Mono, monospace' }}>
+                            Fetching verified source from block explorer...
+                          </div>
+                        )}
+                        {addressResolved && (
+                          <div style={{ marginTop: 5, fontSize: 11, color: '#22c55e', fontFamily: 'JetBrains Mono, monospace' }}>
+                            ✓ Verified source fetched — ready to scan
+                          </div>
+                        )}
+                        {resolveError && (
+                          <div style={{ marginTop: 5, fontSize: 11, color: '#ef4444', fontFamily: 'JetBrains Mono, monospace' }}>
+                            {resolveError}
                           </div>
                         )}
                       </div>
@@ -487,21 +714,63 @@ export default function App() {
                         </select>
                       </div>
 
+                      <button
+                        onClick={async () => {
+                          if (contractAddress.length !== 40) return
+                          setAddressResolving(true)
+                          setResolveError('')
+                          setAddressResolved(false)
+                          try {
+                            const res = await fetch('http://localhost:3002/api/resolve-source', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ contractAddress: `0x${contractAddress}`, chain: 'arc-testnet' }),
+                            })
+                            const data = await res.json()
+                            if (!res.ok) {
+                              setResolveError(data.error ?? 'Failed to resolve source')
+                            } else {
+                              setSource(data.source)
+                              setAddressResolved(true)
+                              setActiveTab(0) // switch to source tab to show the fetched code
+                            }
+                          } catch {
+                            setResolveError('Cannot reach seller API at localhost:3002')
+                          } finally {
+                            setAddressResolving(false)
+                          }
+                        }}
+                        disabled={contractAddress.length !== 40 || addressResolving}
+                        style={{
+                          width: '100%',
+                          background: contractAddress.length === 40 && !addressResolving
+                            ? 'linear-gradient(135deg, #059669, #10b981)'
+                            : 'rgba(16,185,129,0.1)',
+                          color: contractAddress.length === 40 && !addressResolving ? 'white' : '#2a4a3a',
+                          border: '1px solid rgba(16,185,129,0.2)',
+                          borderRadius: 7, padding: '10px 14px',
+                          fontSize: 13, fontWeight: 600, cursor: contractAddress.length === 40 ? 'pointer' : 'not-allowed',
+                          fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
+                        }}
+                      >
+                        {addressResolving ? 'Fetching source...' : 'Fetch Verified Source'}
+                      </button>
+
                       <div style={{
                         background: 'rgba(16,185,129,0.06)',
                         border: '1px solid rgba(16,185,129,0.15)',
                         borderRadius: 7, padding: '10px 12px',
                         fontSize: 11.5, color: '#4a7a6a', lineHeight: 1.6,
                       }}>
-                        The scanner will fetch the verified Solidity source from the block explorer and analyze it in real time.
+                        Enter a verified contract address. The source will be fetched from the block explorer and loaded into the editor for scanning.
                       </div>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Status + address */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+              {/* Status + session info */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                 <div style={{
                   display: 'inline-flex', alignItems: 'center', gap: 5,
                   borderRadius: 6, padding: '4px 10px', fontSize: 10,
@@ -514,42 +783,62 @@ export default function App() {
                   {status}
                 </div>
                 {ensName && (
-                  <span style={{ fontSize: 11, color: '#2a4a3a', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {ensName}
-                  </span>
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    borderRadius: 6, padding: '4px 10px', fontSize: 10,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    background: 'rgba(16,185,129,0.06)',
+                    border: '1px solid rgba(16,185,129,0.1)',
+                    color: '#10b981',
+                  }}>
+                    <span style={{ color: '#4a7a6a' }}>via</span> {ensName}
+                  </div>
+                )}
+                {coordinator.sessionId && status !== 'IDLE' && (
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    borderRadius: 6, padding: '4px 10px', fontSize: 10,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    background: 'rgba(16,185,129,0.04)',
+                    border: '1px solid rgba(16,185,129,0.08)',
+                    color: '#2a4a3a',
+                  }}>
+                    session: {coordinator.sessionId.slice(0, 10)}...
+                  </div>
                 )}
               </div>
 
               {/* Run button */}
               <button
                 onClick={handleRunAudit}
-                disabled={isLive && status === 'IDLE'}
+                disabled={status === 'ACTIVE' || agentStarting}
                 style={{
-                  background: status === 'ACTIVE'
+                  background: (status === 'ACTIVE' || agentStarting)
                     ? 'rgba(16,185,129,0.2)'
-                    : (isLive && status === 'IDLE') ? 'rgba(16,185,129,0.1)' : 'linear-gradient(135deg, #059669, #10b981)',
-                  color: status === 'ACTIVE' ? '#34d399' : (isLive && status === 'IDLE') ? '#2a4a3a' : 'white',
-                  border: status === 'ACTIVE'
+                    : 'linear-gradient(135deg, #059669, #10b981)',
+                  color: (status === 'ACTIVE' || agentStarting) ? '#34d399' : 'white',
+                  border: (status === 'ACTIVE' || agentStarting)
                     ? '1px solid rgba(16,185,129,0.3)'
-                    : (isLive && status === 'IDLE') ? '1px solid rgba(16,185,129,0.15)' : '1px solid transparent',
+                    : '1px solid transparent',
                   borderRadius: 9,
                   padding: '13px 24px', fontSize: 14, fontWeight: 600,
-                  cursor: (status === 'ACTIVE' || (isLive && status === 'IDLE')) ? 'not-allowed' : 'pointer',
+                  cursor: (status === 'ACTIVE' || agentStarting) ? 'not-allowed' : 'pointer',
                   fontFamily: 'Sora, sans-serif', letterSpacing: '-0.01em',
                   display: 'flex', alignItems: 'center',
                   justifyContent: 'center', gap: 8, width: '100%',
                   animation: status === 'ACTIVE' ? 'btnGlow 2s infinite' : 'none',
                   flexShrink: 0, transition: 'all 0.15s',
-                  boxShadow: status !== 'ACTIVE' && !(isLive && status === 'IDLE') ? '0 4px 20px rgba(16,185,129,0.3)' : 'none',
+                  boxShadow: !(status === 'ACTIVE' || agentStarting) ? '0 4px 20px rgba(16,185,129,0.3)' : 'none',
                 }}>
                 <span style={{ fontSize: 14 }}>
-                  {status === 'IDLE' ? (isLive ? '⏸' : '▶') : status === 'ACTIVE' ? '⏳' : '↩'}
+                  {agentStarting ? '⏳' : status === 'IDLE' ? '▶' : status === 'ACTIVE' ? '⏳' : '↩'}
                 </span>
-                {status === 'IDLE' && (isLive ? 'Waiting for agent...' : 'Run Demo')}
-                {status === 'ACTIVE' && `Scanning... ${requestCount}/10`}
-                {status === 'CLOSED' && (isLive ? 'Audit Complete' : 'Run Again')}
-                {(status === 'OPENING' || status === 'CLOSING') && 'Processing...'}
-                {status === 'TERMINATED' && 'Terminated'}
+                {agentStarting && 'Starting agent...'}
+                {!agentStarting && status === 'IDLE' && (coordinator.connected ? 'Run Audit' : 'Run Demo')}
+                {!agentStarting && status === 'ACTIVE' && `Scanning... ${requestCount}/10`}
+                {!agentStarting && status === 'CLOSED' && 'Run Again'}
+                {!agentStarting && (status === 'OPENING' || status === 'CLOSING') && 'Processing...'}
+                {!agentStarting && status === 'TERMINATED' && 'Terminated'}
               </button>
             </div>
 
@@ -616,6 +905,29 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Session closed summary */}
+                {status === 'CLOSED' && coordinator.closedData && (
+                  <div style={{
+                    margin: '8px 10px 0', padding: '10px 12px',
+                    background: 'rgba(16,185,129,0.06)',
+                    border: '1px solid rgba(16,185,129,0.15)',
+                    borderRadius: 6,
+                    display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, flexWrap: 'wrap',
+                  }}>
+                    <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>Audit Complete</span>
+                    <span style={{ fontSize: 10, color: '#4a7a6a', fontFamily: 'JetBrains Mono, monospace' }}>
+                      {findings.length} findings
+                    </span>
+                    <span style={{ fontSize: 10, color: '#4a7a6a', fontFamily: 'JetBrains Mono, monospace' }}>
+                      Cost: {formatUSDC(coordinator.closedData.consumed)}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#22c55e', fontFamily: 'JetBrains Mono, monospace' }}>
+                      Refund: {formatUSDC(coordinator.closedData.refunded)}
+                    </span>
+                    <ArcScanLink hash={coordinator.closedData.txHash} label="Settlement tx ↗" />
+                  </div>
+                )}
+
                 <div className="findings-list" style={{
                   flex: 1, overflowY: 'auto',
                   padding: 10, display: 'flex',
@@ -623,7 +935,7 @@ export default function App() {
                 }}>
                   {filteredFindings.length === 0
                     ? <EmptyState scanning={status === 'ACTIVE'} />
-                    : filteredFindings.map((f, i) => <FindingCard key={`${f.title}-${i}`} finding={f} />)
+                    : filteredFindings.map((f, i) => <FindingCard key={`${f.title}-${i}`} finding={f} txHash={coordinator.categoryTxHashes[f.category]} />)
                   }
                 </div>
               </div>
@@ -728,6 +1040,12 @@ export default function App() {
                     refund
                   </div>
                 </div>
+                {coordinator.closedData?.txHash && (
+                  <>
+                    <div style={{ width: 1, height: 20, background: 'rgba(16,185,129,0.15)' }} />
+                    <ArcScanLink hash={coordinator.closedData.txHash} label="View on ArcScan ↗" />
+                  </>
+                )}
               </>
             )}
           </div>
@@ -761,7 +1079,7 @@ export default function App() {
               }}>{cat}</span>
               <span style={{
                 fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: '#2a4a3a',
-              }}>{formatUSDC(effectivePrice)}</span>
+              }}>{formatUSDC(CATEGORY_PRICES[cat] ?? effectivePrice)}</span>
             </div>
           ))}
         </div>

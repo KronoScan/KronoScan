@@ -73,7 +73,13 @@
       "Bash(curl -s -w \"\\\\nHTTP_CODE: %{http_code}\\\\n\" -X POST http://localhost:3002/api/audit/reentrancy -H \"Content-Type: application/json\" -d '{}')",
       "Bash(curl -s -w \"\\\\nHTTP_CODE: %{http_code}\\\\n\" -X POST http://localhost:3002/api/audit/reentrancy -H \"Content-Type: application/json\" -H \"payment-signature: test-123\" -d '{}')",
       "Bash(PAYMENT_MODE=fallback npx tsx src/index.ts)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(git pull:*)",
+      "Bash(timeout 5 node dist/agent/src/index.js)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(pkill -f \"coordinator/src/index\")",
+      "Bash(pkill -f \"seller-api/src/index\")",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }

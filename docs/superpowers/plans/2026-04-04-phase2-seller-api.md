@@ -611,7 +611,7 @@ Expected: FAIL — `Cannot find module '../src/sourceResolver.js'`
 
 ```typescript
 const EXPLORER_URLS: Record<string, string> = {
-  "arc-testnet": "https://testnet.arcscan.io/api",
+  "arc-testnet": "https://testnet.arcscan.app/api",
 };
 
 export function buildExplorerUrl(address: string, chain: string): string {

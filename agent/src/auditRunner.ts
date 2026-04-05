@@ -1,5 +1,5 @@
 import type { Hex } from "viem";
-import { SELLER_API_URL as DEFAULT_SELLER_API_URL, AUDIT_CATEGORIES } from "./config.js";
+import { SELLER_API_URL as DEFAULT_SELLER_API_URL, AUDIT_CATEGORIES, CATEGORY_PRICES } from "./config.js";
 import {
   parseSSEStream,
   isCategoryComplete,
@@ -27,7 +27,7 @@ export async function runAudit(
   paymentFetch: (url: string | URL | Request, init?: RequestInit) => Promise<Response>,
   coordinator: CoordinatorClient,
   sessionId: Hex,
-  effectivePrice: string,
+  _effectivePrice: string,
   contractSource?: string,
   sellerApiUrl?: string,
 ): Promise<AuditSummary> {
@@ -104,19 +104,20 @@ export async function runAudit(
         }
       }
 
-      // Report payment to coordinator
+      // Report payment to coordinator (per-category pricing)
+      const categoryPrice = CATEGORY_PRICES[category as keyof typeof CATEGORY_PRICES] ?? "100";
       try {
-        const update = await coordinator.recordPayment(sessionId, category, effectivePrice);
-        totalCost += BigInt(effectivePrice);
+        const update = await coordinator.recordPayment(sessionId, category, categoryPrice);
+        totalCost += BigInt(categoryPrice);
         console.log(
-          `  Paid ${effectivePrice} | Total: ${update.totalConsumed} | Remaining: ${update.requestsRemaining}`,
+          `  Paid ${categoryPrice} | Total: ${update.totalConsumed} | Remaining: ${update.requestsRemaining}`,
         );
       } catch (err) {
         console.error(
           `  Warning: Failed to record payment:`,
           err instanceof Error ? err.message : err,
         );
-        totalCost += BigInt(effectivePrice);
+        totalCost += BigInt(categoryPrice);
       }
 
       results.push({ category, findings, source, paymentMode });
