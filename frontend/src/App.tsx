@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useCoordinator } from './hooks/useCoordinator'
 import type { ContractInput, AuditFinding, SessionStatus } from './types'
-import KronoScanLogo from './components/KronoScanLogo'
 import ShapeGrid from './components/ShapeGrid'
 import LandingPage from './LandingPage'
 
@@ -103,20 +102,6 @@ function EmptyState({ scanning }: { scanning: boolean }) {
         submit a contract<br />to begin scanning
       </div>
     </div>
-  )
-}
-
-// --- NAV ICON ---
-function NavIcon({ icon, label, active }: { icon: string; label: string; active: boolean }) {
-  return (
-    <div title={label} className="nav-icon" style={{
-      width: 40, height: 40, borderRadius: 10,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: active ? 'rgba(16,185,129,0.15)' : 'transparent',
-      border: active ? '1px solid rgba(16,185,129,0.3)' : '1px solid transparent',
-      color: active ? '#10b981' : '#2a4a3a',
-      fontSize: 16, cursor: 'pointer', transition: 'all 0.15s',
-    }}>{icon}</div>
   )
 }
 
@@ -257,44 +242,6 @@ export default function App() {
 
       {/* UI LAYER */}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', width: '100%', height: '100%' }}>
-
-        {/* SIDEBAR */}
-        <aside style={{
-          width: 64, background: 'rgba(10,26,18,0.95)',
-          borderRight: '1px solid rgba(16,185,129,0.1)',
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', padding: '18px 0',
-          gap: 6, flexShrink: 0,
-        }}>
-          {/* Logo */}
-          <div style={{ marginBottom: 20, cursor: 'pointer' }} onClick={() => setShowLanding(true)}>
-            <KronoScanLogo size={28} />
-          </div>
-
-          <NavIcon icon="⬡" label="Dashboard" active={true} />
-          <NavIcon icon="⬢" label="Audits" active={false} />
-          <NavIcon icon="◈" label="Reports" active={false} />
-          <NavIcon icon="⬟" label="Settings" active={false} />
-
-          <div style={{ flex: 1 }} />
-
-          <div
-            onClick={connectWallet}
-            title={walletAddress || 'Connect Wallet'}
-            style={{
-              width: 34, height: 34, borderRadius: '50%',
-              background: walletAddress
-                ? 'linear-gradient(135deg, #059669, #10b981)'
-                : 'rgba(16,185,129,0.15)',
-              border: '1px solid rgba(16,185,129,0.3)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, color: '#e2f5ee', fontWeight: 600, cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
-          >
-            {walletAddress ? walletAddress.slice(2, 4).toUpperCase() : '??'}
-          </div>
-        </aside>
 
         {/* MAIN CONTENT */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -680,7 +627,7 @@ export default function App() {
 
       {/* BOTTOM COST BAR */}
       <div style={{
-        position: 'fixed', bottom: 0, left: 64, right: 0,
+        position: 'fixed', bottom: 0, left: 0, right: 0,
         height: 80,
         background: 'rgba(10,26,18,0.9)',
         backdropFilter: 'blur(20px)',
