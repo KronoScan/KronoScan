@@ -134,6 +134,9 @@ wss.on("connection", (ws) => {
         case "subscribe":
           handleSubscribe(ws, msg.sessionId);
           break;
+        case "relay_finding":
+          handleRelayFinding(msg);
+          break;
         default:
           sendTo(ws, { type: "error", message: "Unknown message type" });
       }
@@ -281,6 +284,18 @@ function handleSubscribe(ws: WebSocket, sessionId: Hex) {
     subscriptions.set(sessionId, new Set());
   }
   subscriptions.get(sessionId)!.add(ws);
+}
+
+function handleRelayFinding(
+  msg: Extract<WsMessageIn, { type: "relay_finding" }>
+) {
+  const { sessionId, finding } = msg;
+  const session = sessionManager.getSession(sessionId);
+  if (!session) {
+    console.warn(`[relay] Finding for unknown session ${sessionId}`);
+    return;
+  }
+  broadcast(sessionId, { type: "finding", sessionId, finding });
 }
 
 // ─── Solvency Watchdog ───

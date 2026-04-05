@@ -31,7 +31,8 @@ export type WsMessageIn =
   | { type: "open_session"; seller: Address; pricePerRequest: string; deposit: string; verified: boolean; ensName?: string }
   | { type: "record_payment"; sessionId: Hex; category: string; amount: string }
   | { type: "close_session"; sessionId: Hex }
-  | { type: "subscribe"; sessionId: Hex };
+  | { type: "subscribe"; sessionId: Hex }
+  | { type: "relay_finding"; sessionId: Hex; finding: AuditFinding };
 
 export type WsMessageOut =
   | { type: "session_opened"; sessionId: Hex; effectivePrice: string; deposit: string; startTime: number; ensName?: string }
