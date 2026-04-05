@@ -17,7 +17,7 @@ This is the master context file for the KronoScan project. It contains everythin
 | `cd coordinator && npm run dev` | Start coordinator server |
 | `cd seller-api && npm run dev` | Start seller API |
 | `cd agent && npx tsx src/index.ts` | Run buyer agent demo |
-| `cd frontend && npm run dev` | Start Next.js dashboard |
+| `cd frontend && npm run dev` | Start Vite dashboard |
 
 ## Environment
 
