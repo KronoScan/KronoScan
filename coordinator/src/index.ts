@@ -168,7 +168,7 @@ async function handleOpenSession(
   ws: WebSocket,
   msg: Extract<WsMessageIn, { type: "open_session" }>
 ) {
-  const sessionId = `0x${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}` as Hex;
+  const sessionId = msg.sessionId;
 
   const pricePerRequest = BigInt(msg.pricePerRequest);
   const deposit = BigInt(msg.deposit);
@@ -190,14 +190,22 @@ async function handleOpenSession(
 
   handleSubscribe(ws, sessionId);
 
-  sendTo(ws, {
+  // Broadcast session_opened to ALL connected clients (not just the opener)
+  // so the frontend can auto-detect new sessions
+  const openedMsg: WsMessageOut = {
     type: "session_opened",
     sessionId,
     effectivePrice: session.effectivePrice.toString(),
     deposit: session.deposit.toString(),
     startTime: session.startTime,
     ensName: session.ensName,
-  });
+  };
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(openedMsg));
+    }
+  }
+
 
   console.log(`[session] Opened ${sessionId} | price=${effectivePrice} | deposit=${deposit} | verified=${msg.verified} | ens=${msg.ensName ?? "none"}`);
 }
