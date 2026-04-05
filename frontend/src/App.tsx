@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useCoordinator } from './hooks/useCoordinator'
 import type { ContractInput, AuditFinding, SessionStatus } from './types'
 import ShapeGrid from './components/ShapeGrid'
+import KronoScanLogo from './components/KronoScanLogo'
 import LandingPage from './LandingPage'
 
 // --- DEMO DATA ---
@@ -256,16 +257,22 @@ export default function App() {
             display: 'flex', alignItems: 'center',
             padding: '0 20px', gap: 14, flexShrink: 0,
           }}>
-            {/* Logo text */}
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1 }}>
-                <span style={{ color: '#10b981' }}>Krono</span>
-                <span style={{ color: '#e2f5ee' }}>Scan</span>
+            {/* Logo — clickable back to landing */}
+            <button
+              onClick={() => setShowLanding(true)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: 0 }}
+            >
+              <KronoScanLogo size={32} />
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.03em', fontFamily: 'Sora, sans-serif' }}>
+                  <span style={{ color: '#10b981' }}>Krono</span>
+                  <span style={{ color: '#e2f5ee' }}>Scan</span>
+                </div>
+                <div style={{ fontSize: 8, letterSpacing: '0.18em', color: '#4a7a6a', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace' }}>
+                  SECURITY · STREAM
+                </div>
               </div>
-              <div style={{ fontSize: 8, letterSpacing: '0.18em', color: '#2a4a3a', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>
-                SECURITY · STREAM
-              </div>
-            </div>
+            </button>
 
             {/* Network badge */}
             <div style={{
