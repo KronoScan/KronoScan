@@ -92,6 +92,13 @@ export async function runAudit(
           console.log(
             `  ${severityIcon(event.severity)} [${event.severity}] ${event.title} (line ${event.line})`,
           );
+          coordinator.relayFinding(sessionId, {
+            severity: event.severity,
+            title: event.title,
+            line: event.line,
+            description: event.description ?? "",
+            category,
+          });
         } else if (isCategoryComplete(event)) {
           source = event.source ?? "unknown";
         }

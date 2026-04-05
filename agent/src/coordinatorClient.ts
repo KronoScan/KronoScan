@@ -143,6 +143,18 @@ export class CoordinatorClient {
     return msg as SessionClosedMsg;
   }
 
+  relayFinding(sessionId: Hex, finding: { severity: string; title: string; line: number; description: string; category: string }): void {
+    try {
+      this.send({
+        type: "relay_finding",
+        sessionId,
+        finding,
+      });
+    } catch {
+      // Fire-and-forget — don't break audit if relay fails
+    }
+  }
+
   private rejectAllWaiters(reason: string): void {
     const pending = this.waiters.splice(0);
     for (const waiter of pending) {
