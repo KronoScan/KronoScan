@@ -376,7 +376,8 @@ export default function App() {
     if (agentStarting) return
     setAgentStarting(true)
     try {
-      const res = await fetch('http://localhost:3001/api/start-audit', { method: 'POST' })
+      const coordinatorUrl = import.meta.env.VITE_COORDINATOR_URL || 'http://localhost:3001'
+      const res = await fetch(`${coordinatorUrl}/api/start-audit`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) {
         console.error('[audit] Failed to start:', data.error)
@@ -386,7 +387,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('[audit] Failed to reach coordinator:', err)
-      alert('Cannot reach coordinator at localhost:3001. Is it running?')
+      alert('Cannot reach coordinator. Is it running?')
     } finally {
       setAgentStarting(false)
     }
@@ -721,7 +722,8 @@ export default function App() {
                           setResolveError('')
                           setAddressResolved(false)
                           try {
-                            const res = await fetch('http://localhost:3002/api/resolve-source', {
+                            const sellerUrl = import.meta.env.VITE_SELLER_API_URL || 'http://localhost:3002'
+                            const res = await fetch(`${sellerUrl}/api/resolve-source`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ contractAddress: `0x${contractAddress}`, chain: 'arc-testnet' }),
@@ -735,7 +737,7 @@ export default function App() {
                               setActiveTab(0) // switch to source tab to show the fetched code
                             }
                           } catch {
-                            setResolveError('Cannot reach seller API at localhost:3002')
+                            setResolveError('Cannot reach seller API. Is it running?')
                           } finally {
                             setAddressResolving(false)
                           }

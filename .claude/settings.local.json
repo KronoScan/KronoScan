@@ -79,7 +79,11 @@
       "Bash(echo \"EXIT: $?\")",
       "Bash(pkill -f \"coordinator/src/index\")",
       "Bash(pkill -f \"seller-api/src/index\")",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "Bash(npx vercel:*)",
+      "Bash(npm list:*)",
+      "Read(//home/mbarr/.claude/**)",
+      "Bash(python3 -c ':*)"
     ]
   }
 }

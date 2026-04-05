@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { AuditFinding, SessionStatus } from '../types'
 
-const WS_URL = 'ws://localhost:3001/ws'
-const SESSIONS_API = 'http://localhost:3001/api/sessions'
+const COORDINATOR_URL = import.meta.env.VITE_COORDINATOR_URL || 'http://localhost:3001'
+const WS_URL = import.meta.env.VITE_COORDINATOR_WS_URL || COORDINATOR_URL.replace(/^http/, 'ws') + '/ws'
+const SESSIONS_API = COORDINATOR_URL + '/api/sessions'
 
 interface ClosedData {
   consumed: bigint
