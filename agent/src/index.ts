@@ -6,6 +6,7 @@ import {
   resolveServiceConfig,
 } from "./config.js";
 import { createPaymentFetch, getPaymentMode } from "./x402Client.js";
+import { openOnChainSession } from "./vaultClient.js";
 import { CoordinatorClient } from "./coordinatorClient.js";
 import { runAudit } from "./auditRunner.js";
 
@@ -38,9 +39,19 @@ async function main() {
   const coordinator = new CoordinatorClient();
   await coordinator.connect();
 
-  // Step 4: Open session
-  console.log("\n-- Opening session --");
+  // Step 4: Open on-chain session (deposit USDC into StreamVault)
+  console.log("\n-- Opening on-chain session --");
+  const sessionId = await openOnChainSession(
+    svc.sellerAddress,
+    BigInt(svc.pricePerRequest),
+    BigInt(svc.depositAmount),
+    WORLD_ID_VERIFIED,
+  );
+
+  // Step 5: Register session with coordinator
+  console.log("\n-- Registering session with coordinator --");
   const session = await coordinator.openSession(
+    sessionId,
     svc.sellerAddress,
     svc.pricePerRequest,
     svc.depositAmount,
@@ -51,7 +62,7 @@ async function main() {
   console.log(`Eff. price:   ${session.effectivePrice}`);
   console.log(`Deposit:      ${session.deposit}`);
 
-  // Step 5: Run audit (use resolved API URL)
+  // Step 6: Run audit (use resolved API URL)
   const summary = await runAudit(
     paymentFetch,
     coordinator,
@@ -61,11 +72,11 @@ async function main() {
     svc.sellerApiUrl,
   );
 
-  // Step 6: Close session
+  // Step 7: Close session
   console.log("\n-- Closing session --");
   const closed = await coordinator.closeSession(session.sessionId);
 
-  // Step 7: Print summary
+  // Step 8: Print summary
   const txDisplay =
     closed.txHash.length > 20
       ? `${closed.txHash.slice(0, 18)}...`
