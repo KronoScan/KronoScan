@@ -23,7 +23,7 @@ async function initRealX402(): Promise<boolean> {
     );
 
     // Build route configs for all 10 audit category endpoints
-    const routes: Record<string, { accepts: { scheme: string; network: string; payTo: string; price: string; maxTimeoutSeconds: number; asset: string } }> = {};
+    const routes: Record<string, any> = {};
     for (const category of AUDIT_CATEGORIES) {
       routes[`POST /api/audit/${category}`] = {
         accepts: {

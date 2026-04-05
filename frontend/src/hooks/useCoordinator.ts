@@ -114,6 +114,10 @@ export function useCoordinator(): CoordinatorHook {
 
         switch (msg.type) {
           case 'session_opened':
+            // Auto-subscribe to this session so we receive updates and findings
+            if (ws.readyState === WebSocket.OPEN && msg.sessionId) {
+              ws.send(JSON.stringify({ type: 'subscribe', sessionId: msg.sessionId }))
+            }
             setState(prev => ({
               ...prev,
               status: 'ACTIVE',

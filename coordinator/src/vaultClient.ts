@@ -31,6 +31,7 @@ export class VaultClient {
   public readonly publicClient: PublicClient;
   private readonly walletClient: WalletClient;
   private readonly vaultAddress: Address;
+  private txQueue: Promise<void> = Promise.resolve();
 
   constructor(config: VaultClientConfig) {
     this.vaultAddress = config.vaultAddress;
@@ -104,25 +105,39 @@ export class VaultClient {
     };
   }
 
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.txQueue.then(fn);
+    this.txQueue = result.then(() => {}, () => {});
+    return result;
+  }
+
   async reportConsumption(sessionId: Hex, amount: bigint): Promise<Hex> {
-    return this.walletClient.writeContract({
-      chain: this.walletClient.chain,
-      account: this.walletClient.account!,
-      address: this.vaultAddress,
-      abi: streamVaultAbi,
-      functionName: "reportConsumption",
-      args: [sessionId, amount],
+    return this.enqueue(async () => {
+      const hash = await this.walletClient.writeContract({
+        chain: this.walletClient.chain,
+        account: this.walletClient.account!,
+        address: this.vaultAddress,
+        abi: streamVaultAbi,
+        functionName: "reportConsumption",
+        args: [sessionId, amount],
+      });
+      await this.publicClient.waitForTransactionReceipt({ hash });
+      return hash;
     });
   }
 
   async closeSession(sessionId: Hex): Promise<Hex> {
-    return this.walletClient.writeContract({
-      chain: this.walletClient.chain,
-      account: this.walletClient.account!,
-      address: this.vaultAddress,
-      abi: streamVaultAbi,
-      functionName: "closeSession",
-      args: [sessionId],
+    return this.enqueue(async () => {
+      const hash = await this.walletClient.writeContract({
+        chain: this.walletClient.chain,
+        account: this.walletClient.account!,
+        address: this.vaultAddress,
+        abi: streamVaultAbi,
+        functionName: "closeSession",
+        args: [sessionId],
+      });
+      await this.publicClient.waitForTransactionReceipt({ hash });
+      return hash;
     });
   }
 }
