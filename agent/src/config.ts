@@ -9,6 +9,10 @@ export const SELLER_ADDRESS = (process.env.SELLER_ADDRESS ?? "0x0000000000000000
 export const DEPOSIT_AMOUNT = process.env.DEPOSIT_AMOUNT ?? "1000000";
 export const PRICE_PER_REQUEST = process.env.PRICE_PER_REQUEST ?? "100";
 export const WORLD_ID_VERIFIED = process.env.WORLD_ID_VERIFIED === "true";
+export const PAYMENT_MODE = process.env.PAYMENT_MODE ?? "auto"; // "auto" | "fallback"
+export const ARC_TESTNET_RPC = process.env.ARC_TESTNET_RPC ?? "https://rpc.testnet.arc.network";
+export const VAULT_ADDRESS = (process.env.VAULT_ADDRESS ?? "0x0000000000000000000000000000000000000000") as Address;
+export const USDC_ADDRESS = (process.env.USDC_ADDRESS ?? "0x3600000000000000000000000000000000000000") as Address;
 
 export const AUDIT_CATEGORIES = [
   "reentrancy",
